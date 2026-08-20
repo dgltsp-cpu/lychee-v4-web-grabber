@@ -1,6 +1,8 @@
 services:
   image-grabber-v4:
-    build: .
+    # VPS 直接拉取预构建镜像（推荐）；想从源码构建时取消下面 build 注释
+    image: ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest
+    # build: .
     container_name: image-grabber-v4
     restart: unless-stopped
     ports:

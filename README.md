@@ -37,7 +37,7 @@ flowchart LR
 ```bash
 cd lychee-v4-web-grabber
 cp .env.example .env      # 改成你的 Lychee 地址 / Token
-docker compose up -d
+docker compose up -d      # 默认直接拉取 GHCR 预构建镜像，无需 --build
 ```
 
 浏览器打开 `http://<服务器IP>:8101`(compose 默认映射 8101 端口)。
@@ -99,7 +99,7 @@ docker compose up -d
 
 ## VPS 通过 GitHub 部署
 
-本仓库已托管：https://github.com/dgltsp-cpu/lychee-v4-web-grabber（私有），VPS 上克隆后即可构建运行。前置要求：**VPS 上已先部署 Lychee v4**（克隆 https://github.com/dgltsp-cpu/lychee-v4.git，目录名保持 `lychee-v4`，这样 compose 网络名才是 `lychee-v4_default`），并在 Lychee 后台 设置 → API 生成 Token。
+本仓库已托管：https://github.com/dgltsp-cpu/lychee-v4-web-grabber（私有），VPS 上克隆后**直接拉取 GHCR 预构建镜像**运行（`ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest`，compose 默认指向镜像，无需本地构建）；想改代码可取消 compose 里 `build` 注释自行构建。前置要求：**VPS 上已先部署 Lychee v4**（克隆 https://github.com/dgltsp-cpu/lychee-v4.git，目录名保持 `lychee-v4`，这样 compose 网络名才是 `lychee-v4_default`），并在 Lychee 后台 设置 → API 生成 Token。
 
 ### 1. 配置 Deploy Key（私有仓库只读授权）
 
