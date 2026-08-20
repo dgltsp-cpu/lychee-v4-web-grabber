@@ -825,10 +825,14 @@ def _lychee_photo_url(photo: dict) -> str | None:
     return None
 
 
-def _extract_lychee_album(page_url: str) -> tuple[list[ImageItem], list[ImageItem]] | None:
+def _extract_lychee_album(page_url: str, token: str | None = None) -> tuple[list[ImageItem], list[ImageItem]] | None:
     """Lychee 相册页的照片由 JS 异步加载,这里直接调其 API 取原图/视频。
 
-    v4 专用: POST /api/Album::get(JSON body + XSRF-TOKEN 头), 递归提取嵌套子相册。
+    v4 专用: POST /api/Album::get(JSON body), 递归提取嵌套子相册。
+
+    优先带 API Token(Authorization 头)请求——v4 对匿名请求会返回空相册或 419,
+    私有相册/子相册必须带 Token 才能读到; 带 Token 失败时回退到匿名(XSRF cookie)请求,
+    以兼容公开相册与其他 Lychee 实例。
     非 Lychee 相册页或调用失败时返回 None,上层回退到普通 HTML 提取。
     """
     parts = urlsplit(page_url)
@@ -853,7 +857,7 @@ def _extract_lychee_album(page_url: str) -> tuple[list[ImageItem], list[ImageIte
     except Exception:
         return None
 
-    def fetch_album(aid: str, depth: int = 0) -> bool:
+    def fetch_album(aid: str, depth: int = 0, hdrs: dict | None = None) -> bool:
         """拉取单个相册(照片+子相册), 返回是否取到任何媒体。"""
         if depth > 12:
             return False
@@ -861,7 +865,7 @@ def _extract_lychee_album(page_url: str) -> tuple[list[ImageItem], list[ImageIte
             api_resp = session.post(
                 f"{base}/api/Album::get",
                 json={"albumID": aid},
-                headers=headers,
+                headers=hdrs or headers,
                 timeout=20,
             )
             if api_resp.status_code != 200:
@@ -893,15 +897,26 @@ def _extract_lychee_album(page_url: str) -> tuple[list[ImageItem], list[ImageIte
         for sub in _lychee_album_children(data):
             sub_id = str(sub.get("id") or "")
             if _LYCHEE_ALBUM_ID_RE.match(sub_id):
-                found = fetch_album(sub_id, depth + 1) or found
+                found = fetch_album(sub_id, depth + 1, hdrs) or found
         return found
 
-    try:
-        if not fetch_album(album_id):
+    def attempt(hdrs: dict | None) -> tuple[list[ImageItem], list[ImageItem]] | None:
+        try:
+            if not fetch_album(album_id, hdrs=hdrs):
+                return None
+        except Exception:
             return None
-    except Exception:
-        return None
-    return images, videos
+        return images, videos
+
+    # 优先带 token(自己的实例/私有相册); 取不到媒体时清空结果回退匿名(公开相册/其他实例)
+    if token:
+        res = attempt({"Authorization": token, **headers})
+        if res is not None and (res[0] or res[1]):
+            return res
+        images.clear()
+        videos.clear()
+        seen.clear()
+    return attempt(None)
 
 
 def _media_urls_from_text(text: str, page_url: str, max_items: int = MAX_IMAGES) -> list[ImageItem]:
@@ -1049,7 +1064,8 @@ def api_extract():
         return jsonify(ok=False, error="请输入要抓取的网址"), 400
     deep = bool(body.get("deep")) or request.args.get("deep") == "1"
     mode = "html"
-    lychee_result = _extract_lychee_album(url)
+    lychee_token = (body.get("lychee_token") or "").strip() or LYCHEE_TOKEN or None
+    lychee_result = _extract_lychee_album(url, token=lychee_token)
     if lychee_result is not None:
         items, videos = lychee_result
         final_url = url

@@ -10,6 +10,9 @@ import pytest
 from unittest.mock import Mock
 from PIL import Image
 
+LAST_ALBUM_AUTH = {"value": None}  # 记录最近一次 /api/Album::get 的 Authorization 头
+
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -81,6 +84,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlsplit(self.path).path
         if path == "/api/Album::get":
+            LAST_ALBUM_AUTH["value"] = self.headers.get("Authorization")
             length = int(self.headers.get("Content-Length") or 0)
             try:
                 body = json.loads(self.rfile.read(length) or b"{}")
@@ -292,6 +296,16 @@ def test_extract_lychee_v4_album(site):
     assert images and any(i.url.endswith("pic.jpg") for i in images)
     for item in videos + images:
         assert item.url.startswith(site)  # 相对路径已补全为绝对地址
+
+
+def test_extract_lychee_album_uses_api_token(site):
+    # 带 token 时, Album::get 应携带 Authorization 头(私有相册/子相册必须)
+    LAST_ALBUM_AUTH["value"] = None
+    images, videos = grabber._extract_lychee_album(
+        f"{site}/gallery/AbC1234567890XyZ", token="MY-TOKEN-123"
+    )
+    assert LAST_ALBUM_AUTH["value"] == "MY-TOKEN-123"
+    assert images and videos
 
 
 def test_extract_lychee_v4_hash_album(site):
