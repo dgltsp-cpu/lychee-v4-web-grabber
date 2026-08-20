@@ -70,22 +70,13 @@ BLOCK_PRIVATE_NETWORKS=true          # 抓内网站点改为 false
 
 ## 5. 构建并启动
 
-**默认直接拉取 GHCR 预构建镜像（无需构建）：**
+> 抓图服务默认**从源码构建**（compose 已默认 `build: .`；GHCR 预构建镜像目前仅 arm64，x86 VPS 请用源码构建）。
 
 ```bash
-docker compose up -d
-```
-
-> 私有包需先登录：`echo $PAT | docker login ghcr.io -u dgltsp-cpu --password-stdin`；也可在包设置页把镜像改为 public 后免登录。
-
-**想从源码自己构建时：**
-
-```bash
-# 取消 docker-compose.yml 里 image-grabber-v4 的 build 注释后执行
 docker compose up -d --build
 ```
 
-- 首次源码构建要下载 Playwright Chromium（约 3~8 分钟）
+- 首次构建要下载 Playwright Chromium（约 3~8 分钟）
 - 容器自动加入外部网络 `lychee-v4_default`
 
 验证：

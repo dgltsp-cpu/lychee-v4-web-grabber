@@ -1,8 +1,9 @@
 services:
   image-grabber-v4:
-    # VPS 直接拉取预构建镜像（推荐）；想从源码构建时取消下面 build 注释
-    image: ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest
-    # build: .
+    # 默认从源码构建（x86 VPS 必须用这种方式；GHCR 预构建镜像目前仅 arm64）
+    build: .
+    # 想用预构建镜像时取消下面注释（仅 arm64，如 Apple Silicon Mac）
+    # image: ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest
     container_name: image-grabber-v4
     restart: unless-stopped
     ports:

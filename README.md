@@ -37,10 +37,51 @@ flowchart LR
 ```bash
 cd lychee-v4-web-grabber
 cp .env.example .env      # 改成你的 Lychee 地址 / Token
-docker compose up -d      # 默认直接拉取 GHCR 预构建镜像，无需 --build
+docker compose up -d --build
 ```
 
 浏览器打开 `http://<服务器IP>:8101`(compose 默认映射 8101 端口)。
+首次构建需下载 Playwright Chromium（约 3~8 分钟）。
+
+## VPS 安装步骤（一步步来）
+
+> 抓图服务默认**从源码构建**（GHCR 预构建镜像目前仅 arm64，x86 VPS 请用源码构建）。
+> 前置：VPS 上已部署 Lychee v4（目录名 `lychee-v4`，见 https://github.com/dgltsp-cpu/lychee-v4），并在 Lychee 后台生成 API Token。
+
+**步骤 1：克隆仓库**
+```bash
+git clone https://github.com/dgltsp-cpu/lychee-v4-web-grabber.git
+```
+
+**步骤 2：进入目录**
+```bash
+cd lychee-v4-web-grabber
+```
+
+**步骤 3：生成配置文件**
+```bash
+cp .env.example .env
+```
+
+**步骤 4：编辑配置（必改两项）**
+```bash
+nano .env
+```
+- `LYCHEE_URL=http://lychee-v4:80` —— 与 Lychee 同 Docker 网络，用容器服务名直连
+- `LYCHEE_TOKEN=` —— 填 Lychee 后台生成的 API Token
+
+**步骤 5：构建并启动（首次约 3~8 分钟）**
+```bash
+docker compose up -d --build
+```
+
+**步骤 6：验证**
+```bash
+docker compose ps
+curl -s http://127.0.0.1:8101 | head   # 返回页面 HTML 即成功
+```
+
+浏览器打开 `http://VPS_IP:8101` 即可使用。
 
 ### 获取 Lychee API Token
 
