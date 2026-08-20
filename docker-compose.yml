@@ -1,0 +1,35 @@
+services:
+  image-grabber-v4:
+    build: .
+    container_name: image-grabber-v4
+    restart: unless-stopped
+    ports:
+      - "8101:8000"
+    environment:
+      # Lychee v4.13.0 容器(lychee-v4 部署目录, compose 网络 lychee-v4_default)
+      LYCHEE_URL: "http://lychee-v4:80"
+      # 也可以在网页端填写并保存到浏览器,两者二选一
+      # 取 .env 里的 LYCHEE_TOKEN(明文), .env 已被 gitignore, 不入库
+      LYCHEE_TOKEN: "${LYCHEE_TOKEN:-}"
+      # multipart = 本服务下载后上传字节; import = 让 Lychee 服务端直接拉取 URL
+      UPLOAD_METHOD: "multipart"
+      MAX_IMAGES: "200"
+      # 单条视频大小上限(字节),默认 500MB
+      MAX_VIDEO_BYTES: "524288000"
+      # 默认阻止内网地址;如需抓取内网站点改成 "false"
+      BLOCK_PRIVATE_NETWORKS: "true"
+      # 后台转存并发(图片/视频分池)。2核4G 建议 图片4 视频1;内存紧张时调低图片并发
+      BATCH_CONCURRENCY_IMAGE: "4"
+      BATCH_CONCURRENCY_VIDEO: "1"
+      # 转存为 WebP(网页端可开关)。质量越低体积越小、画质越差
+      WEBP_CONVERT_DEFAULT: "true"
+      WEBP_QUALITY: "80"
+    # 与 Lychee 桥接在同一 docker 网络,直接用服务名访问
+    networks:
+      - default
+      - lychee-v4
+
+networks:
+  lychee-v4:
+    name: lychee-v4_default
+    external: true

@@ -1,0 +1,953 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>网页图片抓取 → Lychee</title>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a;
+      --text: #e8eaf0; --muted: #8b93a5; --accent: #4f8cff; --ok: #3ecf8e; --err: #ff6b6b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px 16px 80px; }
+    header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+    header h1 { font-size: 20px; }
+    header .badge { color: var(--muted); font-size: 12px; }
+
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+    .card h2 { font-size: 14px; margin-bottom: 10px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    input[type=text], input[type=url], select {
+      background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 10px; font-size: 14px; min-width: 0;
+    }
+    input[type=url] { flex: 1; min-width: 260px; }
+    button {
+      background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 14px; cursor: pointer; font-size: 14px;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.danger { background: #c0392b; border-color: #c0392b; color: #fff; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    .hint code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+
+    .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .toolbar .spacer { flex: 1; }
+    #extract-btn { font-weight: 600; }
+
+    .meta { color: var(--muted); font-size: 13px; margin: 14px 0 10px; display: flex; gap: 16px; flex-wrap: wrap; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+    .item {
+      position: relative; background: var(--panel2); border: 1px solid var(--line);
+      border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;
+    }
+    .item.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .thumb-wrap { aspect-ratio: 4 / 3; background: #12141a; position: relative; }
+    .thumb { width: 100%; height: 100%; object-fit: contain; display: block; cursor: pointer; }
+    .thumb.ph { filter: blur(6px) brightness(.7); }
+    .item:hover .thumb { filter: none; }
+    .dim { position: absolute; left: 6px; bottom: 6px; background: rgba(0,0,0,.65); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 6px; }
+    .status {
+      position: absolute; right: 6px; top: 6px; font-size: 11px; padding: 2px 8px;
+      border-radius: 20px; background: rgba(0,0,0,.65); color: #fff; display: none;
+    }
+    .status.err { background: rgba(255,107,107,.9); display: block; }
+    .status.ok { background: rgba(62,207,142,.9); display: block; }
+    .status.busy { background: rgba(79,140,255,.9); display: block; }
+    .alt { font-size: 11px; color: var(--muted); padding: 6px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    select.cb {
+      position: absolute; right: 6px; bottom: 6px; width: 20px; height: 20px;
+      accent-color: var(--accent); cursor: pointer; border-radius: 4px; display: none;
+    }
+    .item.show-check .cb { display: block; }
+    .empty { color: var(--muted); text-align: center; padding: 60px 0; }
+
+    .footer {
+      position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel);
+      border-top: 1px solid var(--line); padding: 10px 16px; z-index: 10;
+    }
+    .footer .row { max-width: 1200px; margin: 0 auto; }
+    .webp-toggle {
+      font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    #progress { flex: 1; height: 6px; background: var(--panel2); border-radius: 4px; overflow: hidden; display: none; }
+    #progress > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+    #status-text { color: var(--muted); font-size: 13px; min-width: 180px; }
+    #summary { padding: 10px; border-radius: 8px; margin-top: 14px; font-size: 13px; display: none; }
+    #summary.ok { background: rgba(62,207,142,.12); color: var(--ok); border: 1px solid rgba(62,207,142,.4); }
+    #summary.err { background: rgba(255,107,107,.12); color: var(--err); border: 1px solid rgba(255,107,107,.4); }
+    #toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); background: var(--err); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; display: none; z-index: 20; max-width: 80vw; }
+
+    /* ---- 书签 ---- */
+    .bm-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .bm-bar > b { color: var(--muted); font-size: 12px; }
+    #bm-select { flex: 1; min-width: 0; max-width: 340px; }
+    .bm-add { font-size: 12px; padding: 4px 12px; border-radius: 20px; }
+    #bm-edit:disabled, #bm-del:disabled { opacity: .4; cursor: not-allowed; }
+    .bm-editor { display: none; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .bm-editor input[type=text] { font-size: 13px; padding: 6px 10px; }
+    .bm-editor #bm-url { flex: 1; min-width: 200px; }
+    .bm-editor button { font-size: 13px; padding: 6px 12px; }
+
+    /* ---- 移动端优化 ---- */
+    @media (max-width: 640px) {
+      .wrap { padding: 12px 10px 96px; }
+      header h1 { font-size: 17px; }
+      header .badge { width: 100%; }
+      input[type=url] { min-width: 0; width: 100%; }
+      input[type=text], input[type=url], select { font-size: 15px; padding: 10px 12px; }
+      button { font-size: 15px; padding: 10px 14px; }
+      .row { gap: 8px; }
+      .grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+      .thumb-wrap { aspect-ratio: 1 / 1; }
+      .alt { font-size: 10px; padding: 5px 6px; }
+      .item .cb { width: 22px; height: 22px; }
+      .footer { padding: 8px 10px; }
+      .footer .row { flex-wrap: wrap; gap: 8px; }
+      .footer .row > * { min-width: 0; }
+      #album-select { max-width: 100% !important; width: 100%; }
+      #status-text { min-width: 0; width: 100%; font-size: 12px; }
+      #progress { width: 100%; flex: none; }
+      #preview-frame { height: 50vh; }
+      #bm-select { max-width: 100% !important; width: 100%; flex: none; }
+      .bm-bar { gap: 8px; }
+      .bm-editor #bm-name { width: 100%; }
+      .bm-editor #bm-url { min-width: 0; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🖼 网页图片抓取 → Lychee</h1>
+    <span class="badge">上传方式: <span id="method-badge">{{ upload_method }}</span></span>
+  </header>
+
+  <div id="toast"></div>
+
+  <section class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Lychee 设置</h2>
+      <div class="row" style="gap:8px">
+        <span id="lychee-state" class="hint" style="margin:0"></span>
+        <button id="toggle-settings" style="font-size:12px;padding:4px 10px">展开设置</button>
+      </div>
+    </div>
+    <div id="lychee-form">
+      <div class="row" style="margin-top:10px">
+        <input type="text" id="lychee-url" placeholder="Lychee 地址, 如 http://192.168.50.185:8000" value="{{ default_lychee_url }}">
+        <input type="text" id="lychee-token" placeholder="API Token(设置 → API → 新建)" value="{{ default_lychee_token }}" style="min-width:260px">
+        <button id="test-btn">连接测试 / 加载相册</button>
+      </div>
+      <div class="hint">Token 仅保存在你浏览器的 localStorage 中，请求经过本服务转发，不会出现在 URL 里。</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>抓取网页图片</h2>
+    <div class="row">
+      <input type="url" id="page-url" placeholder="https://example.com/article/xxx">
+      <button id="preview-btn" title="在下方 iframe 中打开目标网页, 确认内容后再提取">预览网页</button>
+      <button id="extract-btn" class="primary">提取图片</button>
+      <button id="deep-btn" title="用无头浏览器渲染页面并触发懒加载后再提取, 更完整但较慢">深度提取</button>
+    </div>
+    <div class="hint">先点<b>预览网页</b>查看目标页面(确认内容), 再点<b>提取图片</b>或<b>深度提取</b>(JS/懒加载站更完整, 5~15秒)。最多 {{ max_images }} 张。</div>
+
+    <div class="bm-bar">
+      <b>📑 书签</b>
+      <select id="bm-select"><option value="">选择书签…</option></select>
+      <button class="bm-add" id="bm-add">＋ 添加</button>
+      <button id="bm-edit" disabled title="编辑选中的书签">✎ 编辑</button>
+      <button id="bm-del" disabled title="删除选中的书签">× 删除</button>
+    </div>
+    <div class="bm-editor" id="bm-editor">
+      <input type="text" id="bm-name" placeholder="书签名(如: 摄影周刊)">
+      <input type="text" id="bm-url" placeholder="https://example.com/page">
+      <button id="bm-save" class="primary">保存</button>
+      <button id="bm-cancel">取消</button>
+    </div>
+  </section>
+
+  <section class="card" id="preview-wrap" style="display:none">
+    <div class="row" style="margin-bottom:8px">
+      <b>网页预览</b>
+      <span class="spacer"></span>
+      <button id="preview-close" style="font-size:12px">关闭预览</button>
+    </div>
+    <iframe id="preview-frame" style="width:100%;height:60vh;border:1px solid #ccc;border-radius:8px;background:#fff"></iframe>
+    <div class="hint">预览仅供确认页面内容; 若网站禁止嵌入会显示空白, 可直接点提取。</div>
+  </section>
+
+  <section class="card" id="gallery-wrap" style="display:none">
+    <div class="toolbar">
+      <b id="count-label">共 0 个媒体</b>
+      <select id="type-filter">
+        <option value="all">全部</option>
+        <option value="image">图片</option>
+        <option value="video">视频</option>
+      </select>
+      <label><input type="checkbox" id="hide-small"> 隐藏小图(&lt;120px)</label>
+      <span class="spacer"></span>
+      <button id="select-all">全选</button>
+      <button id="select-none">清空</button>
+    </div>
+    <div class="meta">
+      <span id="sel-label">已选 0 张</span>
+      <span id="src-label"></span>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty-box" style="display:none">没有识别到图片或视频，可能是动态渲染页面或需要登录。</div>
+  </section>
+
+  <div id="summary"></div>
+</div>
+
+<div class="footer">
+  <div class="row">
+    <select id="album-select" style="max-width:320px"><option value="">选择目标相册…</option></select>
+    <button id="clear-album-btn" class="danger" disabled title="删除该相册内的全部照片(相册保留,不可恢复)">清空相册</button>
+    <label class="webp-toggle" title="转存时把原图转成 WebP 再上传，体积更小；Lychee 缩略图仍为 JPEG">
+      <input type="checkbox" id="convert-webp" {{ "checked" if default_convert_webp else "" }}> 转存为 WebP
+    </label>
+    <span id="status-text"></span>
+    <div id="progress"><i></i></div>
+    <button id="upload-btn" class="primary" disabled>转存到 Lychee</button>
+    <button id="batch-btn" class="primary" disabled>后台转存</button>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const MAX_IMAGES = {{ max_images }};
+const KEY_URL = "img-grabber.lychee_url";
+const KEY_TOKEN = "img-grabber.lychee_token";
+const KEY_WEBP = "img-grabber.convert_webp";
+const HIDE_SMALL = 120;
+// Lychee 相册页识别: v7+ 路径路由 /gallery/{id}, v4 hash 路由 /#{id}[/{photoID}]
+const LYCHEE_ALBUM_RE = /^https?:\/\/[^/]+\/(?:gallery\/[A-Za-z0-9_-]{8,}|#(?:\/gallery\/)?[A-Za-z0-9_-]{8,}(?:\/[A-Za-z0-9_-]+)?)$/;
+
+let items = [];            // [{url,alt,source,ref,type}]
+let selected = new Set();  // 已选 index
+let uploading = false;
+let batching = false;      // 后台转存进行中
+let pollTimer = null;
+let activeBatchId = null;  // 当前后台任务 id
+const KEY_BATCH = "img-grabber.batch_id";
+const KEY_BOOKMARKS = "img-grabber.bookmarks";
+let filter = "all";
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.style.display = "block";
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => (t.style.display = "none"), 5000);
+}
+
+function settings() {
+  const url = $("lychee-url").value.trim().replace(/\/+$/, "");
+  const token = $("lychee-token").value.trim();
+  localStorage.setItem(KEY_URL, url);
+  localStorage.setItem(KEY_TOKEN, token);
+  return { lychee_url: url, lychee_token: token };
+}
+
+function settingsConfigured() {
+  return !!(localStorage.getItem(KEY_URL) && localStorage.getItem(KEY_TOKEN));
+}
+
+function setSettingsOpen(open) {
+  $("lychee-form").style.display = open ? "" : "none";
+  $("toggle-settings").textContent = open ? "收起设置" : "展开设置";
+  $("lychee-state").textContent = open
+    ? ""
+    : settingsConfigured()
+      ? "✅ " + localStorage.getItem(KEY_URL)
+      : "未配置";
+}
+
+$("toggle-settings").addEventListener("click", () => {
+  setSettingsOpen($("lychee-form").style.display === "none");
+});
+
+function visibleIndexes() {
+  const out = [];
+  items.forEach((img, i) => {
+    if (filter !== "all" && img.type !== filter) return;
+    out.push(i);
+  });
+  return out;
+}
+
+function refreshFooter() {
+  $("sel-label").textContent = "已选 " + selected.size + " 张";
+  const canGo = selected.size && $("album-select").value && !batching;
+  $("upload-btn").disabled = !canGo;
+  $("batch-btn").disabled = !canGo;
+  $("clear-album-btn").disabled = !$("album-select").value || batching;
+}
+
+function showCheckboxes() {
+  document.querySelectorAll(".item").forEach((el) => el.classList.add("show-check"));
+}
+
+function render() {
+  const grid = $("grid");
+  grid.innerHTML = "";
+  $("count-label").textContent = "共 " + items.length + " 个媒体";
+  if (!items.length) {
+    $("gallery-wrap").style.display = "block";
+    $("empty-box").style.display = "block";
+    return;
+  }
+  $("empty-box").style.display = "none";
+
+  const hideSmall = $("hide-small").checked;
+  let shown = 0;
+  items.forEach((img, idx) => {
+    if (filter !== "all" && img.type !== filter) return;
+    shown++;
+    const el = document.createElement("div");
+    el.className = "item" + (selected.has(idx) ? " selected" : "");
+    el.dataset.idx = idx;
+
+    const wrap = document.createElement("div");
+    wrap.className = "thumb-wrap";
+
+    let media;
+    if (img.type === "video") {
+      media = document.createElement("video");
+      media.controls = true;
+      media.preload = "metadata";
+      media.muted = true;
+      media.className = "thumb";
+      media.src = "/api/proxy_stream?url=" + encodeURIComponent(img.url) +
+                  "&ref=" + encodeURIComponent(img.ref || "") +
+                  (img.source === "lychee" ? "&allow_private=1" : "");
+      media.onerror = () => {
+        const ok = $("ok-" + idx);
+        if (ok) ok.textContent = "加载失败";
+      };
+      wrap.appendChild(media);
+
+      const dim = document.createElement("span");
+      dim.className = "dim";
+      dim.textContent = "🎬 " + (img.url.split(".").pop() || "video").toUpperCase();
+      el.appendChild(dim);
+    } else {
+      media = document.createElement("img");
+      media.className = "thumb ph";
+      media.loading = "lazy";
+      media.alt = img.alt || "图片";
+      media.dataset.fullUrl = "/api/proxy?url=" + encodeURIComponent(img.url) +
+                              "&ref=" + encodeURIComponent(img.ref || "") +
+                              (img.source === "lychee" ? "&allow_private=1" : "");
+      media.onerror = () => {
+        const ok = $("ok-" + idx);
+        if (ok) ok.textContent = "加载失败";
+      };
+      media.onload = () => {
+        media.classList.remove("ph");
+        const w = media.naturalWidth, h = media.naturalHeight;
+        let dim = el.querySelector(".dim");
+        if (!dim && w) {
+          dim = document.createElement("span");
+          dim.className = "dim";
+          el.appendChild(dim);
+        }
+        if (dim) dim.textContent = w + "×" + h;
+        if (hideSmall && w && w < HIDE_SMALL) el.classList.add("tiny");
+      };
+      wrap.appendChild(media);
+    }
+
+    const status = document.createElement("span");
+    status.className = "status";
+    status.id = "ok-" + idx;
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "cb";
+    cb.checked = selected.has(idx);
+    cb.addEventListener("change", () => {
+      selected.has(idx) ? selected.delete(idx) : selected.add(idx);
+      el.classList.toggle("selected", cb.checked);
+      refreshFooter();
+    });
+
+    const alt = document.createElement("div");
+    alt.className = "alt";
+    alt.textContent = (img.alt || img.url).slice(0, 80);
+    alt.title = img.url;
+
+    el.append(wrap, status, cb, alt);
+    if (img.type !== "video") {
+      media.addEventListener("click", () => {
+        cb.click();
+      });
+    }
+    grid.appendChild(el);
+  });
+
+  $("count-label").textContent = "共 " + items.length + " 个媒体，显示 " + shown + " 个";
+  if (!shown) {
+    $("empty-box").style.display = "block";
+    $("empty-box").textContent = "该分类下没有内容。";
+  } else {
+    $("empty-box").style.display = "none";
+  }
+  showCheckboxes();
+  lazyLoad();
+  refreshFooter();
+}
+
+function lazyLoad() {
+  const imgs = document.querySelectorAll("img.thumb");
+  if (!("IntersectionObserver" in window)) {
+    imgs.forEach((im) => (im.src = im.dataset.fullUrl));
+    return;
+  }
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((e) => {
+      if (e.isIntersecting) {
+        const im = e.target;
+        im.src = im.dataset.fullUrl;
+        io.unobserve(im);
+      }
+    });
+  }, { rootMargin: "400px" });
+  imgs.forEach((im) => io.observe(im));
+}
+
+$("preview-btn").addEventListener("click", () => {
+  const url = $("page-url").value.trim();
+  if (!url) return toast("请输入网址");
+  const frame = $("preview-frame");
+  // Lychee 相册页直接走同源 /lp/ 代理(路由结构一致, SPA 才不跳转)
+  const lm = url.match(LYCHEE_ALBUM_RE);
+  frame.src = lm
+    ? "/lp/" + url.replace(/^https?:\/\//, "")
+    : "/api/frame?url=" + encodeURIComponent(url);
+  $("preview-wrap").style.display = "block";
+});
+$("preview-close").addEventListener("click", () => {
+  $("preview-wrap").style.display = "none";
+  $("preview-frame").src = "about:blank";
+});
+
+function getCurrentTarget() {
+  // 优先取 iframe 当前显示的网页(预览中点击链接导航后, 提取跟随预览)
+  const frame = $("preview-frame");
+  try {
+    const fsrc = frame.contentWindow.location.href || "";
+    if (fsrc.indexOf("/api/frame?url=") !== -1) {
+      const u = new URL(fsrc).searchParams.get("url");
+      if (u) return u;
+    }
+    const lm = fsrc.match(/\/lp\/([^/]+)(\/.*)?$/);
+    if (lm) return "http://" + lm[1] + (lm[2] || "");
+  } catch (e) { /* 跨域或未加载, 忽略 */ }
+  return $("page-url").value.trim();
+}
+
+async function runExtract(deep) {
+  const url = getCurrentTarget();
+  if (!url) return toast("请输入网址");
+  const btn = deep ? $("deep-btn") : $("extract-btn");
+  const label = deep ? "深度提取" : "提取图片";
+  btn.disabled = true;
+  btn.textContent = deep ? "渲染中…(约5-15秒)" : "提取中…";
+  try {
+    // 非深度模式下, 优先直接提取预览 iframe 中已加载的页面内容(所见即所得, 秒出)
+    let preview = null;
+    if (!deep) {
+      // Lychee 相册走 API 提取(返回原图/原视频), 预览 DOM 里 SPA 渲染的 URL 不可靠
+      const lycheeAlbum = LYCHEE_ALBUM_RE.test(url);
+      try {
+        const doc = $("preview-frame").contentDocument;
+        if (doc && doc.documentElement && !lycheeAlbum) {
+          const baseEl = doc.querySelector("base[href]");
+          let baseUrl = baseEl ? baseEl.getAttribute("href") : null;
+          if (baseUrl && baseUrl.indexOf("/lp/") === 0) baseUrl = "http://" + baseUrl.slice(4);
+          if (baseUrl) {
+            preview = { html: doc.documentElement.outerHTML, url: baseUrl };
+          }
+        }
+      } catch (e) { /* iframe 跨域或未加载, 忽略 */ }
+    }
+    let res;
+    if (preview) {
+      res = await fetch("/api/extract_html", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(preview),
+      });
+    } else {
+      res = await fetch("/api/extract" + (deep ? "?deep=1" : ""), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+    }
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "提取失败");
+    items = [
+      ...(data.images || []).map((im) => ({ ...im, type: "image" })),
+      ...(data.videos || []).map((v) => ({ ...v, type: "video" })),
+    ];
+    selected.clear();
+    const modeText = data.mode === "deep" ? "深度渲染"
+      : data.mode === "lychee" ? "Lychee相册API"
+      : data.mode === "preview" ? "预览已加载内容"
+      : "网页源码";
+    $("src-label").textContent = "来源: " + data.source + "  [" + modeText + "]";
+    $("type-filter").value = "all";
+    filter = "all";
+    $("hide-small").checked = false;
+    $("gallery-wrap").style.display = "block";
+    render();
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+
+$("extract-btn").addEventListener("click", () => runExtract(false));
+$("deep-btn").addEventListener("click", () => runExtract(true));
+
+$("test-btn").addEventListener("click", async () => {
+  const btn = $("test-btn");
+  btn.disabled = true;
+  btn.textContent = "连接中…";
+  try {
+    const res = await fetch("/api/albums", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings()),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "连接失败");
+    const sel = $("album-select");
+    sel.innerHTML = '<option value="">选择目标相册…</option>';
+    data.albums.forEach((a) => {
+      const opt = document.createElement("option");
+      opt.value = a.id;
+      // path 由后端拼好(如「旅行 / 2026」), 旧后端/旧版本无 path 时回退 title
+      opt.textContent = (a.path || a.title) + " (#" + a.id + ")";
+      sel.appendChild(opt);
+    });
+    toast("连接成功，共 " + data.albums.length + " 个相册");
+    refreshFooter();
+    setSettingsOpen(false);
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "连接测试 / 加载相册";
+  }
+});
+
+$("album-select").addEventListener("change", refreshFooter);
+
+$("clear-album-btn").addEventListener("click", async () => {
+  const albumId = $("album-select").value;
+  if (!albumId) return toast("请先选择目标相册");
+  const opt = $("album-select").selectedOptions[0];
+  const label = opt ? opt.textContent : albumId;
+  if (!confirm(`确定清空相册「${label}」内的全部照片吗？此操作不可恢复！`)) return;
+  const btn = $("clear-album-btn");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/album/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...settings(), album_id: albumId }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "清空失败");
+    toast(`已清空 ${data.deleted} 张照片`);
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("select-all").addEventListener("click", () => {
+  selected = new Set(visibleIndexes());
+  render();
+});
+$("select-none").addEventListener("click", () => {
+  selected.clear();
+  render();
+});
+$("type-filter").addEventListener("change", () => {
+  filter = $("type-filter").value;
+  render();
+});
+$("hide-small").addEventListener("change", () => {
+  const hide = $("hide-small").checked;
+  document.querySelectorAll(".item").forEach((el) => {
+    const dim = el.querySelector(".dim");
+    const w = dim ? parseInt(dim.textContent) : 0;
+    if (hide && w && w < HIDE_SMALL) el.style.display = "none";
+    else el.style.display = "";
+  });
+});
+
+$("upload-btn").addEventListener("click", async () => {
+  if (uploading) return;
+  const albumId = $("album-select").value;
+  if (!albumId) return toast("请先选择目标相册");
+  uploading = true;
+  $("upload-btn").disabled = true;
+  $("summary").style.display = "none";
+
+  const list = [...selected].sort((a, b) => a - b);
+  const total = list.length;
+  let okCount = 0, failCount = 0;
+  const progress = $("progress");
+  progress.style.display = "block";
+
+  for (let i = 0; i < total; i++) {
+    const idx = list[i];
+    const img = items[idx];
+    const st = $("ok-" + idx);
+    if (!st) continue;
+    st.className = "status busy";
+    st.textContent = "上传中 " + (i + 1) + "/" + total;
+    $("status-text").textContent = "正在转存 " + (i + 1) + "/" + total;
+    progress.querySelector("i").style.width = (i / total * 100) + "%";
+    try {
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: img.url,
+          album_id: albumId,
+          title: img.alt || "",
+          ref: img.ref || "",
+          type: img.type || "image",
+          allow_private: img.source === "lychee",
+          convert_webp: $("convert-webp").checked,
+          ...settings(),
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "上传失败");
+      okCount++;
+      st.className = "status ok";
+      st.textContent = data.webp ? "✓ 已转存·WebP" : "✓ 已转存";
+    } catch (err) {
+      failCount++;
+      st.className = "status err";
+      st.textContent = "✗";
+      st.title = err.message;
+      console.error("upload failed:", img.url, err.message);
+    }
+  }
+  progress.querySelector("i").style.width = "100%";
+  const summary = $("summary");
+  summary.className = failCount ? (okCount ? "err" : "err") : "ok";
+  summary.style.display = "block";
+  summary.textContent = okCount
+    ? "完成: 成功转存 " + okCount + " 张" + (failCount ? "，失败 " + failCount + " 张(可移入相册查看)" : "，可在 Lychee 相册中查看。")
+    : "全部失败: " + failCount + " 张，详见各图片右上角提示";
+  $("status-text").textContent = "完成";
+  progress.style.display = "none";
+  uploading = false;
+  $("upload-btn").disabled = false;
+  refreshFooter();
+  toast(okCount ? "转存完成: " + okCount + " 张成功" : "转存失败");
+});
+
+// ---------------- 后台转存（服务器排队执行，断网/锁屏不影响） ----------------
+function setBatchStatus(text) {
+  $("status-text").textContent = text;
+}
+
+function updateBatchProgress(task) {
+  const progress = $("progress");
+  progress.style.display = "block";
+  const pct = task.total ? (task.done / task.total * 100) : 0;
+  progress.querySelector("i").style.width = pct + "%";
+  setBatchStatus("后台转存 " + task.done + "/" + task.total + (task.status === "done" ? "（完成）" : ""));
+  task.results.forEach((r, i) => {
+    const st = $("ok-" + i);
+    if (!st) return;
+    if (!r.done) {
+      if (st.textContent === "✓ 已转存" || st.textContent === "✗") return;
+      st.className = "status busy";
+      st.textContent = "排队中";
+    } else if (r.ok) {
+      st.className = "status ok";
+      st.textContent = "✓ 已转存";
+      st.title = "";
+    } else {
+      st.className = "status err";
+      st.textContent = "✗";
+      st.title = r.error || "转存失败";
+    }
+  });
+  if (task.status === "done") {
+    const okC = task.ok_count, failC = task.fail_count;
+    const summary = $("summary");
+    summary.className = failC ? "err" : "ok";
+    summary.style.display = "block";
+    summary.textContent = okC
+      ? "后台转存完成: 成功 " + okC + " 张" + (failC ? "，失败 " + failC + " 张(可查看各图右上角提示)" : "")
+      : "后台转存全部失败: " + failC + " 张";
+  }
+}
+
+function stopBatchPoll() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  batching = false;
+  activeBatchId = null;
+  localStorage.removeItem(KEY_BATCH);
+  $("progress").style.display = "none";
+  refreshFooter();
+}
+
+function startBatchPoll(taskId) {
+  batching = true;
+  activeBatchId = taskId;
+  localStorage.setItem(KEY_BATCH, taskId);
+  refreshFooter();
+  $("summary").style.display = "none";
+  setBatchStatus("已提交后台任务，正在轮询进度…");
+
+  const poll = async () => {
+    try {
+      const res = await fetch("/api/batch/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_id: taskId }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setBatchStatus(data.error || "任务不存在或已过期");
+        stopBatchPoll();
+        return;
+      }
+      updateBatchProgress(data.task);
+      if (data.task.status === "done") {
+        toast("后台转存完成");
+        stopBatchPoll();
+        return;
+      }
+    } catch (err) {
+      // 断网/服务器暂不可达：不停止轮询，等待重连后自动恢复
+      setBatchStatus("网络中断，等待重连…");
+    }
+  };
+  stopBatchPoll();
+  batching = true;
+  activeBatchId = taskId;
+  localStorage.setItem(KEY_BATCH, taskId);
+  refreshFooter();
+  poll();
+  pollTimer = setInterval(poll, 1500);
+}
+
+$("batch-btn").addEventListener("click", async () => {
+  if (batching) return;
+  const albumId = $("album-select").value;
+  if (!albumId) return toast("请先选择目标相册");
+  const list = [...selected].sort((a, b) => a - b);
+  if (!list.length) return toast("请先勾选要转存的图片/视频");
+
+  const itemsPayload = list.map((idx) => {
+    const img = items[idx];
+    return {
+      url: img.url,
+      title: img.alt || "",
+      ref: img.ref || "",
+      type: img.type || "image",
+    };
+  });
+
+  try {
+    const res = await fetch("/api/batch/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: itemsPayload,
+        album_id: albumId,
+        allow_private: items[list[0]] && items[list[0]].source === "lychee",
+        convert_webp: $("convert-webp").checked,
+        ...settings(),
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "创建任务失败");
+    toast("后台任务已提交，共 " + data.total + " 项");
+    startBatchPoll(data.task_id);
+  } catch (err) {
+    toast("提交失败: " + err.message);
+  }
+});
+
+// ---- 书签 ----
+let bookmarks = [];
+let editingBmIndex = -1;
+
+function loadBookmarks() {
+  fetch("/api/bookmarks")
+    .then((r) => r.json())
+    .then((data) => {
+      if (!data.ok) throw new Error(data.error || "加载失败");
+      const serverList = Array.isArray(data.bookmarks)
+        ? data.bookmarks.filter((b) => b && b.name && b.url)
+        : [];
+      // 首次迁移: 服务器为空但浏览器旧书签有数据时, 上传一次
+      const localRaw = localStorage.getItem(KEY_BOOKMARKS);
+      if (!serverList.length && localRaw) {
+        try {
+          const local = JSON.parse(localRaw);
+          if (Array.isArray(local) && local.length) {
+            bookmarks = local.filter((b) => b && b.name && b.url);
+            persistBookmarks();
+            return;
+          }
+        } catch (e) {}
+      }
+      bookmarks = serverList;
+      renderBookmarks();
+    })
+    .catch((err) => {
+      toast("书签加载失败: " + err.message);
+      renderBookmarks();
+    });
+}
+
+function persistBookmarks() {
+  renderBookmarks();
+  fetch("/api/bookmarks", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bookmarks }),
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      if (!data.ok) throw new Error(data.error || "保存失败");
+    })
+    .catch((err) => toast("书签保存失败: " + err.message));
+}
+
+function updateBmButtons() {
+  const bm = bookmarks[Number($("bm-select").value)];
+  $("bm-edit").disabled = !bm;
+  $("bm-del").disabled = !bm;
+}
+
+function renderBookmarks() {
+  const sel = $("bm-select");
+  const prev = sel.value;
+  sel.innerHTML = "";
+  if (!bookmarks.length) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "暂无书签，点「＋ 添加」保存常用网址";
+    sel.appendChild(opt);
+    sel.disabled = true;
+    $("bm-edit").disabled = true;
+    $("bm-del").disabled = true;
+    return;
+  }
+  sel.disabled = false;
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "选择书签…";
+  sel.appendChild(placeholder);
+  bookmarks.forEach((bm, i) => {
+    const opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = bm.name;
+    opt.title = bm.url;
+    sel.appendChild(opt);
+  });
+  // 编辑/删除后重建时保持原来的选中项
+  if (prev !== "" && bookmarks[Number(prev)]) sel.value = prev;
+  updateBmButtons();
+}
+
+$("bm-select").addEventListener("change", () => {
+  const bm = bookmarks[Number($("bm-select").value)];
+  updateBmButtons();
+  if (!bm) return;
+  $("page-url").value = bm.url;
+  toast("已填入: " + bm.name);
+});
+$("bm-edit").addEventListener("click", () => {
+  const bm = bookmarks[Number($("bm-select").value)];
+  if (bm) openBmEditor(bookmarks.indexOf(bm));
+});
+$("bm-del").addEventListener("click", () => {
+  const idx = Number($("bm-select").value);
+  const bm = bookmarks[idx];
+  if (!bm) return;
+  if (!confirm("删除书签「" + bm.name + "」?")) return;
+  bookmarks.splice(idx, 1);
+  $("bm-select").value = "";
+  persistBookmarks();
+});
+
+function openBmEditor(i) {
+  editingBmIndex = i;
+  $("bm-name").value = i >= 0 ? bookmarks[i].name : "";
+  $("bm-url").value = i >= 0 ? bookmarks[i].url : "";
+  $("bm-editor").style.display = "flex";
+  $("bm-name").focus();
+}
+
+$("bm-add").addEventListener("click", () => openBmEditor(-1));
+$("bm-cancel").addEventListener("click", () => {
+  $("bm-editor").style.display = "none";
+  editingBmIndex = -1;
+});
+$("bm-save").addEventListener("click", () => {
+  const name = $("bm-name").value.trim();
+  const url = $("bm-url").value.trim();
+  if (!name) return toast("请填写书签名");
+  if (!/^https?:\/\//i.test(url)) return toast("网址需以 http(s):// 开头");
+  const entry = { name, url };
+  if (editingBmIndex >= 0) bookmarks[editingBmIndex] = entry;
+  else bookmarks.push(entry);
+  persistBookmarks();
+  $("bm-editor").style.display = "none";
+  editingBmIndex = -1;
+  toast("书签已保存");
+});
+
+loadBookmarks();
+renderBookmarks();
+
+// 页面加载时恢复未完成的后台任务
+(function restoreBatch() {
+  const saved = localStorage.getItem(KEY_BATCH);
+  if (saved && /^[A-Za-z0-9_-]{8,64}$/.test(saved)) {
+    startBatchPoll(saved);
+  }
+})();
+
+(function init() {
+  $("lychee-url").value = localStorage.getItem(KEY_URL) || "{{ default_lychee_url }}";
+  $("lychee-token").value = localStorage.getItem(KEY_TOKEN) || "{{ default_lychee_token }}";
+  $("convert-webp").checked = localStorage.getItem(KEY_WEBP) !== "0";
+  $("convert-webp").addEventListener("change", () => {
+    localStorage.setItem(KEY_WEBP, $("convert-webp").checked ? "1" : "0");
+  });
+  setSettingsOpen(!settingsConfigured());
+  if ($("lychee-url").value && $("lychee-token").value) $("test-btn").click();
+})();
+</script>
+</body>
+</html>
