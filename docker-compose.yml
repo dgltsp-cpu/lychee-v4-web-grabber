@@ -22,7 +22,7 @@ services:
       # 默认阻止内网地址;如需抓取内网站点改成 "false"
       BLOCK_PRIVATE_NETWORKS: "true"
       # 后台转存并发(图片/视频分池)。2核4G 建议 图片4 视频1;内存紧张时调低图片并发
-      BATCH_CONCURRENCY_IMAGE: "4"
+      BATCH_CONCURRENCY_IMAGE: "6"
       BATCH_CONCURRENCY_VIDEO: "1"
       # 转存为 WebP(网页端可开关)。质量越低体积越小、画质越差
       WEBP_CONVERT_DEFAULT: "true"
