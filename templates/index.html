@@ -15,6 +15,13 @@
     header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
     header h1 { font-size: 20px; }
     header .badge { color: var(--muted); font-size: 12px; }
+    .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .settings-btn {
+      display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+      background: var(--panel2); border: 1px solid var(--line); border-radius: 20px;
+      padding: 6px 14px; font-size: 13px; color: var(--text); cursor: pointer;
+    }
+    .settings-btn:hover { border-color: var(--accent); }
 
     .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
     .card h2 { font-size: 14px; margin-bottom: 10px; }
@@ -34,6 +41,11 @@
     button:disabled { opacity: .5; cursor: not-allowed; }
     .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
     .hint code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+
+    /* ---- Lychee 设置表单 ---- */
+    .settings-form { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+    .dot.ok { background: var(--ok); }
 
     .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .toolbar .spacer { flex: 1; }
@@ -98,7 +110,9 @@
     @media (max-width: 640px) {
       .wrap { padding: 12px 10px 96px; }
       header h1 { font-size: 17px; }
-      header .badge { width: 100%; }
+      header .badge { width: auto; }
+      .header-actions { width: 100%; justify-content: space-between; align-items: center; }
+      .settings-btn { flex: none; }
       input[type=url] { min-width: 0; width: 100%; }
       input[type=text], input[type=url], select { font-size: 15px; padding: 10px 12px; }
       button { font-size: 15px; padding: 10px 14px; }
@@ -118,6 +132,14 @@
       .bm-bar { gap: 8px; }
       .bm-editor #bm-name { width: 100%; }
       .bm-editor #bm-url { min-width: 0; width: 100%; }
+      .actions { flex-direction: column; align-items: stretch; }
+      .actions input[type=url] { width: 100%; }
+      .actions button { width: 100%; }
+      .toolbar button { flex: 1; white-space: nowrap; }
+      .settings-form .row { flex-direction: column; align-items: stretch; }
+      .settings-form input[type=text] { width: 100%; }
+      .settings-form #test-btn { width: 100%; }
+      .footer .row > button { flex: 1; }
     }
   </style>
 </head>
@@ -125,38 +147,33 @@
 <div class="wrap">
   <header>
     <h1>🖼 网页图片抓取 → Lychee</h1>
-    <span class="badge">上传方式: <span id="method-badge">{{ upload_method }}</span></span>
+    <div class="header-actions">
+      <span class="badge">上传方式: <span id="method-badge">{{ upload_method }}</span></span>
+      <button id="toggle-settings" class="settings-btn" type="button">
+        ⚙ Lychee 设置 <span id="lychee-state" class="dot"></span><span id="toggle-arrow">▾</span>
+      </button>
+    </div>
   </header>
 
   <div id="toast"></div>
 
-  <section class="card">
-    <div class="row" style="justify-content:space-between">
-      <h2 style="margin:0">Lychee 设置</h2>
-      <div class="row" style="gap:8px">
-        <span id="lychee-state" class="hint" style="margin:0"></span>
-        <button id="toggle-settings" style="font-size:12px;padding:4px 10px">展开设置</button>
-      </div>
+  <div id="lychee-form" class="settings-form">
+    <div class="row">
+      <input type="text" id="lychee-url" placeholder="Lychee 地址, 如 http://192.168.50.185:8000" value="{{ default_lychee_url }}">
+      <input type="text" id="lychee-token" placeholder="API Token(设置 → API → 新建)" value="{{ default_lychee_token }}">
+      <button id="test-btn">连接测试 / 加载相册</button>
     </div>
-    <div id="lychee-form">
-      <div class="row" style="margin-top:10px">
-        <input type="text" id="lychee-url" placeholder="Lychee 地址, 如 http://192.168.50.185:8000" value="{{ default_lychee_url }}">
-        <input type="text" id="lychee-token" placeholder="API Token(设置 → API → 新建)" value="{{ default_lychee_token }}" style="min-width:260px">
-        <button id="test-btn">连接测试 / 加载相册</button>
-      </div>
-      <div class="hint">Token 仅保存在你浏览器的 localStorage 中，请求经过本服务转发，不会出现在 URL 里。</div>
-    </div>
-  </section>
+    <div class="hint">Token 仅保存在你浏览器的 localStorage 中，请求经过本服务转发，不会出现在 URL 里。</div>
+  </div>
 
   <section class="card">
     <h2>抓取网页图片</h2>
-    <div class="row">
+    <div class="row actions">
       <input type="url" id="page-url" placeholder="https://example.com/article/xxx">
       <button id="preview-btn" title="在下方 iframe 中打开目标网页, 确认内容后再提取">预览网页</button>
       <button id="extract-btn" class="primary">提取图片</button>
       <button id="deep-btn" title="用无头浏览器渲染页面并触发懒加载后再提取, 更完整但较慢">深度提取</button>
     </div>
-    <div class="hint">先点<b>预览网页</b>查看目标页面(确认内容), 再点<b>提取图片</b>或<b>深度提取</b>(JS/懒加载站更完整, 5~15秒)。最多 {{ max_images }} 张。</div>
 
     <div class="bm-bar">
       <b>📑 书签</b>
@@ -195,6 +212,7 @@
       <span class="spacer"></span>
       <button id="select-all">全选</button>
       <button id="select-none">清空</button>
+      <button id="clear-preview" title="清除全部预览项, 回到未提取状态">清除预览</button>
     </div>
     <div class="meta">
       <span id="sel-label">已选 0 张</span>
@@ -263,12 +281,8 @@ function settingsConfigured() {
 
 function setSettingsOpen(open) {
   $("lychee-form").style.display = open ? "" : "none";
-  $("toggle-settings").textContent = open ? "收起设置" : "展开设置";
-  $("lychee-state").textContent = open
-    ? ""
-    : settingsConfigured()
-      ? "✅ " + localStorage.getItem(KEY_URL)
-      : "未配置";
+  $("toggle-arrow").textContent = open ? "▾" : "▸";
+  $("lychee-state").className = "dot" + (settingsConfigured() ? " ok" : "");
 }
 
 $("toggle-settings").addEventListener("click", () => {
@@ -587,6 +601,16 @@ $("select-all").addEventListener("click", () => {
 $("select-none").addEventListener("click", () => {
   selected.clear();
   render();
+});
+$("clear-preview").addEventListener("click", () => {
+  items = [];
+  selected = new Set();
+  $("gallery-wrap").style.display = "none";
+  $("grid").innerHTML = "";
+  $("empty-box").style.display = "none";
+  $("summary").style.display = "none";
+  refreshFooter();
+  toast("已清除预览");
 });
 $("type-filter").addEventListener("change", () => {
   filter = $("type-filter").value;
