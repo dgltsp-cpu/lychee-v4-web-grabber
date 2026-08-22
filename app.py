@@ -18,6 +18,8 @@ import os
 import re
 import secrets
 import socket
+import subprocess
+import tempfile
 import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor
@@ -257,6 +259,61 @@ _PLACEHOLDER_RE = re.compile(
 )
 _BAD_URL_PATH_RE = re.compile(r"[()\[\]{};,*|<>\"'\\\s]")
 _VIDEO_EXT = (".mp4", ".webm", ".mov", ".m4v", ".ogv", ".avi", ".mkv")
+
+# Lychee v4 支持的视频扩展名(与 Lychee BaseMediaFile SUPPORTED_VIDEO_FILE_EXTENSIONS 一致)
+_LYCHEE_VIDEO_EXT = {".mp4", ".webm", ".mov", ".m4v", ".ogv", ".avi", ".mpg", ".wmv"}
+# Content-Type subtype → Lychee 支持的扩展名(CDN 常把视频标成 octet-stream / URL 无扩展名)
+_LYCHEE_VIDEO_SUBTYPE_TO_EXT = {
+    "mp4": ".mp4",
+    "mpeg": ".mpg",
+    "ogg": ".ogv",
+    "webm": ".webm",
+    "quicktime": ".mov",
+    "x-msvideo": ".avi",
+    "x-m4v": ".m4v",
+    "x-ms-wmv": ".wmv",
+    "x-ms-asf": ".wmv",
+    # 无法从 header 判定具体格式时按 mp4 处理, Lychee 会嗅探真实内容; 若真不是视频则明确报错
+    "octet-stream": ".mp4",
+}
+
+
+def _transcode_video_to_mp4(data: bytes, ext: str) -> tuple[bytes | None, str]:
+    """用 ffmpeg 把 Lychee 不支持的视频格式(如 mkv)转码为 mp4。
+
+    返回 (mp4 字节, 错误信息)；成功时错误信息为空串。
+    """
+    tmp_in = tmp_out = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext or ".video", delete=False) as f:
+            f.write(data)
+            tmp_in = f.name
+        tmp_out = tempfile.mktemp(suffix=".mp4")
+        proc = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", tmp_in,
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart",
+                "-threads", "2",
+                tmp_out,
+            ],
+            capture_output=True,
+            timeout=1800,
+        )
+        if proc.returncode != 0 or not os.path.exists(tmp_out):
+            return None, "ffmpeg 转码失败: " + proc.stderr.decode(errors="replace")[-300:]
+        with open(tmp_out, "rb") as f:
+            return f.read(), ""
+    except Exception as exc:  # noqa: BLE001
+        return None, f"视频转码异常: {exc}"
+    finally:
+        for p in (tmp_in, tmp_out):
+            try:
+                if p and os.path.exists(p):
+                    os.remove(p)
+            except OSError:
+                pass
 
 # ---------------------------------------------------------------- 后台转存任务
 # 任务保存在内存中，完成后保留一段时间自动清理（不持久化，重启即失效）。
@@ -708,19 +765,37 @@ def _transfer_one(
 
     ext = os.path.splitext(urlsplit(url).path)[1].lower()
     probe = None
+    converted = False
     if kind == "video":
-        if "video" not in content_type and ext not in _VIDEO_EXT:
+        # CDN 常把视频标成 application/octet-stream(URL 也可能无扩展名), 一律放行交给后续处理
+        is_octet = content_type in ("application/octet-stream", "binary/octet-stream")
+        if "video" not in content_type and not is_octet and ext not in _VIDEO_EXT:
             return {"ok": False, "error": "下载内容不是有效视频"}
         fmt = content_type.split("/")[-1] if "/" in content_type else ""
         if fmt == "quicktime":
             fmt = "mov"
+        if ext not in _LYCHEE_VIDEO_EXT:
+            mapped = _LYCHEE_VIDEO_SUBTYPE_TO_EXT.get(fmt)
+            if mapped:
+                # 内容其实是 Lychee 支持的视频(octet-stream / 无扩展名 URL), 补上正确后缀即可
+                ext = mapped
+                fmt = mapped[1:]
+            else:
+                # Lychee v4 不支持 mkv 等格式, 转码为 mp4 再上传
+                mp4_data, err = _transcode_video_to_mp4(data, ext)
+                if mp4_data is None:
+                    return {"ok": False, "error": err}
+                data = mp4_data
+                content_type = "video/mp4"
+                ext = ".mp4"
+                fmt = "mp4"
+                converted = True
     else:
         probe = _probe(data)
         if probe is None:
             return {"ok": False, "error": "下载内容不是有效图片"}
         (width, height), fmt = probe
 
-    converted = False
     if convert_webp and kind == "image":
         webp_data = _to_webp(data, fmt)
         if webp_data is not None:
@@ -731,9 +806,12 @@ def _transfer_one(
 
     filename = os.path.basename(urlsplit(url).path) or "image"
     if converted:
-        filename = os.path.splitext(filename)[0] + ".webp"
+        filename = os.path.splitext(filename)[0] + (".webp" if kind == "image" else ".mp4")
+    elif kind == "video":
+        # 视频上传文件名必须用 Lychee 支持的扩展名(CDN URL 常见无扩展名/错误扩展名, 否则 Lychee 拒收)
+        filename = os.path.splitext(filename)[0] + ext
     elif not os.path.splitext(filename)[1]:
-        filename += "." + (fmt or ("mp4" if kind == "video" else "jpg")).lower()
+        filename += "." + (fmt or "jpg").lower()
     try:
         photo_id = lychee_upload(
             base,
@@ -748,7 +826,7 @@ def _transfer_one(
         return {"ok": False, "error": str(exc)}
     result: dict = {"ok": True, "photo_id": photo_id, "type": kind}
     if converted:
-        result["webp"] = True
+        result["webp" if kind == "image" else "video_transcoded"] = True
     if probe:
         result["width"] = width
         result["height"] = height
@@ -923,6 +1001,66 @@ def _extract_lychee_album(page_url: str, token: str | None = None) -> tuple[list
     return attempt(None)
 
 
+def _extract_photovault(page_url: str) -> tuple[list[ImageItem], list[ImageItem]] | None:
+    """PhotoVault 网盘站(folder.html?token=xxx)适配: 内容由 JS 调 JSON API 动态加载,
+    普通 HTML 提取拿不到媒体。这里直接调其公开 API 拉取文件列表:
+      GET /api/public/f/{folder_token}/info   → 文件夹信息
+      GET /api/public/f/{folder_token}/items  → 文件列表(含 file_url/media_type)
+    非 PhotoVault 站或需密码时返回 None, 上层回退到普通提取。
+    """
+    parts = urlsplit(page_url)
+    qs = urllib.parse.parse_qs(parts.query)
+    folder_token = (qs.get("token") or [""])[0].strip()
+    if len(folder_token) < 8:
+        return None
+    origin = f"{parts.scheme}://{parts.netloc}"
+    headers = {"User-Agent": UA, "Accept": "application/json"}
+    try:
+        r = requests.get(f"{origin}/api/public/f/{folder_token}/info", headers=headers, timeout=15)
+        if r.status_code != 200:
+            return None
+        info = r.json()
+        if info.get("code") != 0:
+            return None
+        if info.get("data", {}).get("has_password"):
+            return None
+    except (requests.RequestException, ValueError):
+        return None
+
+    images: list[ImageItem] = []
+    videos: list[ImageItem] = []
+    page = 1
+    while page <= 100:
+        try:
+            r = requests.get(
+                f"{origin}/api/public/f/{folder_token}/items?page={page}&per_page=100",
+                headers=headers,
+                timeout=20,
+            )
+            data = r.json()
+            batch = data.get("data", {}).get("items") or []
+        except (requests.RequestException, ValueError):
+            break
+        if not batch:
+            break
+        for it in batch:
+            file_url = (it.get("file_url") or "").strip()
+            if not file_url:
+                continue
+            real = urljoin(origin + "/", file_url)
+            filename = (it.get("filename") or "").strip()
+            is_video = (it.get("media_type") or "").lower() == "video"
+            item = ImageItem(url=real, alt=filename, source="photovault", ref=page_url)
+            (videos if is_video else images).append(item)
+        if page >= int(data.get("data", {}).get("pages") or 1):
+            break
+        page += 1
+
+    if not images and not videos:
+        return None
+    return images, videos
+
+
 def _media_urls_from_text(text: str, page_url: str, max_items: int = MAX_IMAGES) -> list[ImageItem]:
     """通用媒体嗅探: 从任意文本(JSON/JS/HTML)里找出图片/视频直链。
 
@@ -1070,10 +1208,15 @@ def api_extract():
     mode = "html"
     lychee_token = (body.get("lychee_token") or "").strip() or LYCHEE_TOKEN or None
     lychee_result = _extract_lychee_album(url, token=lychee_token)
+    pv_result = None if lychee_result is not None else _extract_photovault(url)
     if lychee_result is not None:
         items, videos = lychee_result
         final_url = url
         mode = "lychee"
+    elif pv_result is not None:
+        items, videos = pv_result
+        final_url = url
+        mode = "photovault"
     elif deep:
         deep_result = render_extract(url)
         if deep_result is not None:

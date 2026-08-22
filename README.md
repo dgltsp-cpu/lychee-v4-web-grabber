@@ -28,7 +28,9 @@ flowchart LR
    - `multipart`(默认)：本服务下载图片字节 → `POST /api/v1/Photo` 上传到 Lychee。不依赖 Lychee 到外网的连通性，最稳。
    - `import`：调用 Lychee 的 `/api/v1/Import`，由 Lychee 服务端直接拉取图片 URL，适合图片本身就在公网、且希望节省本服务流量的场景。
 
-**视频支持**：工具同样提取页面中的 `<video>`/`<source>`、`og:video` 以及指向 `.mp4/.webm/.mov` 等的下载链接，通过 `/api/proxy_stream` 流式代理预览（支持 Range 拖动进度条），选择后以 `multipart` 上传到 Lychee。单条视频默认上限 500MB（`MAX_VIDEO_BYTES`）。
+**视频支持**：工具同样提取页面中的 `<video>`/`<source>`、`og:video` 以及指向 `.mp4/.webm/.mov` 等的下载链接，通过 `/api/proxy_stream` 流式代理预览（支持 Range 拖动进度条），选择后以 `multipart` 上传到 Lychee。单条视频默认上限 500MB（`MAX_VIDEO_BYTES`）。上传时会自动处理两种情况：
+- CDN 把视频标成 `application/octet-stream` 或 URL 无扩展名 → 自动补 Lychee 支持的扩展名（如 `.mp4`），不再被 Lychee 拒收
+- Lychee 不支持的格式（如 `.mkv`）→ 自动用 ffmpeg 转码为 mp4 后再上传
 
 > 📖 **VPS 部署请看完整指南：[DEPLOY.md](DEPLOY.md)**（克隆、拉镜像、Nginx 反代、排错）
 
