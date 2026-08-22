@@ -37,15 +37,15 @@ flowchart LR
 ```bash
 cd lychee-v4-web-grabber
 cp .env.example .env      # 改成你的 Lychee 地址 / Token
-docker compose up -d --build
+docker compose up -d      # 默认拉取 GHCR 双架构镜像
 ```
 
 浏览器打开 `http://<服务器IP>:8101`(compose 默认映射 8101 端口)。
-首次构建需下载 Playwright Chromium（约 3~8 分钟）。
+首次拉取镜像约 1~3 分钟（含 Playwright Chromium）；想从源码构建时取消 compose 里 `build` 注释再用 `--build`。
 
 ## VPS 安装步骤（一步步来）
 
-> 抓图服务默认**从源码构建**；也可直接拉取 GHCR 预构建镜像（`ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest`，已含 linux/amd64 + linux/arm64 双架构，x86 VPS 可直接拉取运行）。
+> 抓图服务默认**拉取 GHCR 预构建镜像**（`ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest`，已含 linux/amd64 + linux/arm64 双架构，x86 VPS 可直接拉取运行）；想改代码可切换为源码构建。
 > 前置：VPS 上已部署 Lychee v4（目录名 `lychee-v4`，见 https://github.com/dgltsp-cpu/lychee-v4），并在 Lychee 后台生成 API Token。
 
 **步骤 1：克隆仓库**
@@ -70,9 +70,9 @@ nano .env
 - `LYCHEE_URL=http://lychee-v4:80` —— 与 Lychee 同 Docker 网络，用容器服务名直连
 - `LYCHEE_TOKEN=` —— 填 Lychee 后台生成的 API Token
 
-**步骤 5：构建并启动（首次约 3~8 分钟）**
+**步骤 5：拉取镜像并启动（首次约 1~3 分钟）**
 ```bash
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
 **步骤 6：验证**
@@ -173,13 +173,13 @@ nano .env
 - `LYCHEE_TOKEN=` 填 Lychee 后台生成的 API Token
 - 按需调整 `UPLOAD_METHOD`、`MAX_IMAGES`、`BLOCK_PRIVATE_NETWORKS` 等
 
-### 4. 构建并启动
+### 4. 拉取镜像并启动
 
 ```bash
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
-首次构建需下载 Playwright Chromium，约 3~8 分钟。验证：
+首次拉取镜像约 1~3 分钟（含 Playwright Chromium）。验证：
 
 ```bash
 docker compose ps

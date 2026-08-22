@@ -1,9 +1,9 @@
 services:
   image-grabber-v4:
-    # 默认从源码构建（x86 VPS 必须用这种方式；GHCR 预构建镜像目前仅 arm64）
-    build: .
-    # 想用预构建镜像时取消下面注释（仅 arm64，如 Apple Silicon Mac）
-    # image: ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest
+    # 默认拉取 GHCR 预构建镜像（已含 linux/amd64 + linux/arm64 双架构，x86 VPS 可直接拉取）
+    image: ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest
+    # 想改代码从源码构建时：注释掉 image 并取消下面 build 注释（首次构建需下载 Playwright Chromium）
+    # build: .
     container_name: image-grabber-v4
     restart: unless-stopped
     ports:
