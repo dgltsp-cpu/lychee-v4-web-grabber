@@ -30,7 +30,7 @@ flowchart LR
 
 **视频支持**：工具同样提取页面中的 `<video>`/`<source>`、`og:video` 以及指向 `.mp4/.webm/.mov` 等的下载链接，通过 `/api/proxy_stream` 流式代理预览（支持 Range 拖动进度条），选择后以 `multipart` 上传到 Lychee。单条视频默认上限 500MB（`MAX_VIDEO_BYTES`）。
 
-> 📖 **VPS 部署请看完整指南：[DEPLOY.md](DEPLOY.md)**（Deploy Key、克隆、构建、Nginx 反代、排错）
+> 📖 **VPS 部署请看完整指南：[DEPLOY.md](DEPLOY.md)**（克隆、拉镜像、Nginx 反代、排错）
 
 ## 快速开始(Docker)
 
@@ -140,27 +140,16 @@ curl -s http://127.0.0.1:8101 | head   # 返回页面 HTML 即成功
 
 ## VPS 通过 GitHub 部署
 
-本仓库已托管：https://github.com/dgltsp-cpu/lychee-v4-web-grabber（私有），VPS 上克隆后**直接拉取 GHCR 预构建镜像**运行（`ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest`，compose 默认指向镜像，无需本地构建）；想改代码可取消 compose 里 `build` 注释自行构建。前置要求：**VPS 上已先部署 Lychee v4**（克隆 https://github.com/dgltsp-cpu/lychee-v4.git，目录名保持 `lychee-v4`，这样 compose 网络名才是 `lychee-v4_default`），并在 Lychee 后台 设置 → API 生成 Token。
+本仓库已托管（**公开**）：https://github.com/dgltsp-cpu/lychee-v4-web-grabber，VPS 上克隆后**直接拉取 GHCR 预构建镜像**运行（`ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest`，compose 默认指向镜像，无需本地构建）；想改代码可取消 compose 里 `build` 注释自行构建。前置要求：**VPS 上已先部署 Lychee v4**（克隆 https://github.com/dgltsp-cpu/lychee-v4.git，目录名保持 `lychee-v4`，这样 compose 网络名才是 `lychee-v4_default`），并在 Lychee 后台 设置 → API 生成 Token。
 
-### 1. 配置 Deploy Key（私有仓库只读授权）
-
-```bash
-ssh-keygen -t ed25519 -f ~/.ssh/grabber_deploy -N "" -C "grabber-deploy"
-cat ~/.ssh/grabber_deploy.pub   # 复制整行公钥
-```
-
-到 GitHub 仓库 **Settings → Deploy keys → Add deploy key** 粘贴公钥（不要勾选写权限）。
-
-### 2. 克隆
+### 1. 克隆（公开仓库，无需密钥）
 
 ```bash
-ssh -i ~/.ssh/grabber_deploy -T git@github.com   # 看到 Hi <用户名>! 即成功
-GIT_SSH_COMMAND='ssh -i ~/.ssh/grabber_deploy' \
-  git clone git@github.com:dgltsp-cpu/lychee-v4-web-grabber.git
+git clone https://github.com/dgltsp-cpu/lychee-v4-web-grabber.git
 cd lychee-v4-web-grabber
 ```
 
-### 3. 配置 .env
+### 2. 配置 .env
 
 ```bash
 cp .env.example .env
@@ -173,7 +162,7 @@ nano .env
 - `LYCHEE_TOKEN=` 填 Lychee 后台生成的 API Token
 - 按需调整 `UPLOAD_METHOD`、`MAX_IMAGES`、`BLOCK_PRIVATE_NETWORKS` 等
 
-### 4. 拉取镜像并启动
+### 3. 拉取镜像并启动
 
 ```bash
 docker compose pull && docker compose up -d
@@ -188,12 +177,12 @@ curl -s http://127.0.0.1:8101 | head   # 返回页面 HTML 即成功
 
 浏览器打开 `http://VPS_IP:8101` 即可使用（如需要更安全，把 compose 端口改成 `127.0.0.1:8101:8000` 并加 Nginx 反代）。
 
-### 5. 升级（推荐：直接拉新镜像）
+### 4. 升级（推荐：直接拉新镜像）
 
 镜像已包含 linux/amd64 与 linux/arm64 双架构，升级只需重新拉取并重建容器，**无需在 VPS 上重新构建**（省去下载 Playwright Chromium 的时间）：
 
 ```bash
-GIT_SSH_COMMAND='ssh -i ~/.ssh/grabber_deploy' git pull
+git pull
 docker compose pull && docker compose up -d
 ```
 

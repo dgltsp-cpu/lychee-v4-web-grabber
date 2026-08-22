@@ -1,6 +1,6 @@
 # image-grabber VPS 部署指南（通过 GitHub）
 
-本指南把「网页图片抓取 → Lychee v4」服务部署到 VPS。仓库：https://github.com/dgltsp-cpu/lychee-v4-web-grabber（私有），仅适配 Lychee v4.13.0（Lychee 部署见 https://github.com/dgltsp-cpu/lychee-v4）。
+本指南把「网页图片抓取 → Lychee v4」服务部署到 VPS。仓库：https://github.com/dgltsp-cpu/lychee-v4-web-grabber（公开），仅适配 Lychee v4.13.0（Lychee 部署见 https://github.com/dgltsp-cpu/lychee-v4）。
 
 ## 0. 架构与前置
 
@@ -22,36 +22,14 @@ flowchart LR
 ssh root@137.175.102.212 -p 64898
 ```
 
-## 2. 配置 Deploy Key（私有仓库只读授权）
-
-GitHub 的 Deploy Key 是**按仓库**生效的，grabber 需要单独一把（不能复用 lychee-deploy 的）：
+## 2. 克隆代码（公开仓库，无需密钥）
 
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/grabber_deploy -N "" -C "grabber-deploy"
-cat ~/.ssh/grabber_deploy.pub
-```
-
-复制输出的整行公钥，打开 https://github.com/dgltsp-cpu/lychee-v4-web-grabber/settings/keys → **Add deploy key**：
-- Title：`grabber-vps`
-- Key：粘贴公钥
-- 不要勾选 *Allow write access* → Add key
-
-验证授权：
-
-```bash
-ssh -i ~/.ssh/grabber_deploy -T git@github.com
-# 期望输出：Hi dgltsp-cpu! You've successfully authenticated
-```
-
-## 3. 克隆代码
-
-```bash
-GIT_SSH_COMMAND='ssh -i ~/.ssh/grabber_deploy' \
-  git clone git@github.com:dgltsp-cpu/lychee-v4-web-grabber.git
+git clone https://github.com/dgltsp-cpu/lychee-v4-web-grabber.git
 cd lychee-v4-web-grabber
 ```
 
-## 4. 配置 .env
+## 3. 配置 .env
 
 ```bash
 cp .env.example .env
@@ -68,7 +46,7 @@ MAX_IMAGES=200
 BLOCK_PRIVATE_NETWORKS=true          # 抓内网站点改为 false
 ```
 
-## 5. 拉取镜像并启动
+## 4. 拉取镜像并启动
 
 > 默认拉取 GHCR 预构建镜像 `ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest`（已含 **linux/amd64 + linux/arm64 双架构**，x86 VPS 可直接拉取运行，无需源码构建）。想改代码时再切换 compose 里的 `build: .`。
 
@@ -86,7 +64,7 @@ docker compose ps                              # image-grabber 应为 Up
 curl -s http://127.0.0.1:8101 | head           # 返回页面 HTML 即成功
 ```
 
-## 6. 使用
+## 5. 使用
 
 浏览器打开 `http://VPS_IP:8101`：
 
@@ -94,7 +72,7 @@ curl -s http://127.0.0.1:8101 | head           # 返回页面 HTML 即成功
 2. 勾选图片 → 选择 Lychee 相册 → 转存
 3. Token 也可在网页右上角设置里填写（优先于 .env）
 
-## 7.（可选）Nginx 反代 + HTTPS
+## 6.（可选）Nginx 反代 + HTTPS
 
 不建议把 8101 直接暴露公网（工具无多用户鉴权）。推荐先改 compose 端口为仅本机：
 
@@ -135,10 +113,10 @@ sudo ln -s /etc/nginx/sites-available/grabber /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-## 8. 升级
+## 7. 升级
 
 ```bash
-GIT_SSH_COMMAND='ssh -i ~/.ssh/grabber_deploy' git pull
+git pull
 docker compose pull && docker compose up -d
 ```
 
