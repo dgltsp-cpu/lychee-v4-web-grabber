@@ -68,15 +68,15 @@ MAX_IMAGES=200
 BLOCK_PRIVATE_NETWORKS=true          # 抓内网站点改为 false
 ```
 
-## 5. 构建并启动
+## 5. 拉取镜像并启动
 
-> 抓图服务默认**从源码构建**（compose 已默认 `build: .`；GHCR 预构建镜像目前仅 arm64，x86 VPS 请用源码构建）。
+> 默认拉取 GHCR 预构建镜像 `ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest`（已含 **linux/amd64 + linux/arm64 双架构**，x86 VPS 可直接拉取运行，无需源码构建）。想改代码时再切换 compose 里的 `build: .`。
 
 ```bash
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
-- 首次构建要下载 Playwright Chromium（约 3~8 分钟）
+- 首次拉取镜像约 1~3 分钟（镜像内含 Playwright Chromium）
 - 容器自动加入外部网络 `lychee-v4_default`
 
 验证：
@@ -139,8 +139,10 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ```bash
 GIT_SSH_COMMAND='ssh -i ~/.ssh/grabber_deploy' git pull
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
+
+> 若只改了 `docker-compose.yml` 里的环境变量（如并发数），不需要重新拉镜像，`docker compose up -d --force-recreate` 即可生效。
 
 ## 常见问题
 
