@@ -554,11 +554,15 @@ def _lychee_check(resp: requests.Response) -> None:
 def lychee_albums(base: str, token: str) -> list[dict]:
     """拉取 Lychee v4 相册列表(含嵌套子相册)，返回扁平数组供前端下拉选择。
 
-    v4 接口: POST /api/Albums::get, 返回嵌套 albums 树(含 shared_albums)。
+    v4 接口: POST /api/Albums::tree 返回完整嵌套树(含子相册);
+    Albums::get 只返回顶级相册,子相册会丢失,故优先用 tree。
     子相册的 title/path 形如「父相册 / 子相册」，便于下拉框展示层级。
     """
     headers = _lychee_headers(token)
-    resp = requests.post(f"{base}/api/Albums::get", json={}, headers=headers, timeout=20)
+    resp = requests.post(f"{base}/api/Albums::tree", json={}, headers=headers, timeout=20)
+    if resp.status_code == 404:
+        # 兼容没有 tree 接口的旧版:退回 Albums::get(仅顶级相册)
+        resp = requests.post(f"{base}/api/Albums::get", json={}, headers=headers, timeout=20)
     _lychee_check(resp)
     data = resp.json()
 

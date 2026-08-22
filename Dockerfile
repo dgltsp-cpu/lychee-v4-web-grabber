@@ -14,4 +14,4 @@ COPY templates ./templates
 
 EXPOSE 8000
 
-CMD ["gunicorn", "-b", "0.0.0.0:8000", "-w", "2", "--threads", "8", "--timeout", "300", "app:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:8000", "-w", "1", "--threads", "16", "--timeout", "300", "app:app"]

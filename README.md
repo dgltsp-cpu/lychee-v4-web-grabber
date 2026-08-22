@@ -45,7 +45,7 @@ docker compose up -d --build
 
 ## VPS 安装步骤（一步步来）
 
-> 抓图服务默认**从源码构建**（GHCR 预构建镜像目前仅 arm64，x86 VPS 请用源码构建）。
+> 抓图服务默认**从源码构建**；也可直接拉取 GHCR 预构建镜像（`ghcr.io/dgltsp-cpu/lychee-v4-web-grabber:latest`，已含 linux/amd64 + linux/arm64 双架构，x86 VPS 可直接拉取运行）。
 > 前置：VPS 上已部署 Lychee v4（目录名 `lychee-v4`，见 https://github.com/dgltsp-cpu/lychee-v4），并在 Lychee 后台生成 API Token。
 
 **步骤 1：克隆仓库**
@@ -102,7 +102,7 @@ curl -s http://127.0.0.1:8101 | head   # 返回页面 HTML 即成功
 | `MAX_PAGE_BYTES` | 8MB | 页面 HTML 大小上限 |
 | `MAX_IMAGE_BYTES` | 20MB | 单张图片大小上限 |
 | `BLOCK_PRIVATE_NETWORKS` | `true` | 默认阻止内网/IPv6 本地地址，防 SSRF；抓内网站点改 `false` |
-| `BATCH_CONCURRENCY_IMAGE` | `4` | 后台转存图片并发数。2核4G 建议 4；内存紧张可调低 |
+| `BATCH_CONCURRENCY_IMAGE` | `2` | 后台转存图片并发数。默认 2 防 CPU/内存打满导致页面卡顿；机器强可调高到 4 |
 | `BATCH_CONCURRENCY_VIDEO` | `1` | 后台转存视频并发数。视频文件大，建议保持 1 防内存爆 |
 | `WEBP_CONVERT_DEFAULT` | `true` | 网页端「转存为 WebP」开关的默认值 |
 | `WEBP_QUALITY` | `80` | 转 WebP 时的质量(0-100)，越低体积越小、画质越差 |
@@ -110,7 +110,7 @@ curl -s http://127.0.0.1:8101 | head   # 返回页面 HTML 即成功
 
 ## 后台转存（推荐）
 
-实时「转存到 Lychee」由浏览器逐张发请求，手机断网/锁屏/关页面会中断。**后台转存**把整批链接一次性提交给服务器，由服务器后台线程**图片/视频分池并发**下载并上传（默认图片 4 并发、视频 1 并发，可用 `BATCH_CONCURRENCY_IMAGE/VIDEO` 调整），手机断网也不影响：
+实时「转存到 Lychee」由浏览器逐张发请求，手机断网/锁屏/关页面会中断。**后台转存**把整批链接一次性提交给服务器，由服务器后台线程**图片/视频分池并发**下载并上传（默认图片 2 并发、视频 1 并发，可用 `BATCH_CONCURRENCY_IMAGE/VIDEO` 调整；并发过高会把 CPU/内存打满，导致页面和进度变卡），手机断网也不影响：
 
 - 勾选图片/视频 → 选相册 → 点 **后台转存**
 - 选相册时自动递归列出 Lychee 嵌套子相册，下拉框里显示「父相册 / 子相册」层级路径（v4 的 `POST /api/Albums::get` 一次返回完整嵌套树）
@@ -188,10 +188,20 @@ curl -s http://127.0.0.1:8101 | head   # 返回页面 HTML 即成功
 
 浏览器打开 `http://VPS_IP:8101` 即可使用（如需要更安全，把 compose 端口改成 `127.0.0.1:8101:8000` 并加 Nginx 反代）。
 
-### 5. 升级
+### 5. 升级（推荐：直接拉新镜像）
+
+镜像已包含 linux/amd64 与 linux/arm64 双架构，升级只需重新拉取并重建容器，**无需在 VPS 上重新构建**（省去下载 Playwright Chromium 的时间）：
 
 ```bash
 GIT_SSH_COMMAND='ssh -i ~/.ssh/grabber_deploy' git pull
+docker compose pull && docker compose up -d
+```
+
+> 若改动涉及 `docker-compose.yml` 里的环境变量或命令，重建容器后生效：`docker compose up -d --force-recreate`。旧版双 worker 导致后台转存进度丢失的问题，升级到新镜像即修复（单 worker + 图片并发默认 2）。
+
+如果想基于最新源码重新构建（改动 Dockerfile/依赖时用）：
+
+```bash
 docker compose up -d --build
 ```
 
