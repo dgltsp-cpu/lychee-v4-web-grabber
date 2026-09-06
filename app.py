@@ -57,6 +57,10 @@ MAX_IMAGES = _env_int("MAX_IMAGES", 200)
 MAX_PAGE_BYTES = _env_int("MAX_PAGE_BYTES", 8 * 1024 * 1024)
 MAX_IMAGE_BYTES = _env_int("MAX_IMAGE_BYTES", 20 * 1024 * 1024)
 MAX_VIDEO_BYTES = _env_int("MAX_VIDEO_BYTES", 500 * 1024 * 1024)
+# 本地上传(手机相册/文件直传)的单文件大小上限
+MAX_LOCAL_IMAGE_BYTES = _env_int("MAX_LOCAL_IMAGE_BYTES", 20 * 1024 * 1024)
+# 转发给 Lychee 时 requests 会把整个 multipart 体缓冲在内存, 上限不宜给太大
+MAX_LOCAL_VIDEO_BYTES = _env_int("MAX_LOCAL_VIDEO_BYTES", 100 * 1024 * 1024)
 BLOCK_PRIVATE_NETWORKS = _env_bool("BLOCK_PRIVATE_NETWORKS", True)
 DEEP_EXTRACT_ENABLED = _env_bool("DEEP_EXTRACT_ENABLED", True)
 DEEP_EXTRACT_SCROLLS = int(os.environ.get("DEEP_EXTRACT_SCROLLS", "3"))
@@ -68,6 +72,10 @@ _bookmarks_lock = threading.Lock()
 # 转存时把图片原图转为 WebP 再上传(更省空间;缩略图仍是 Lychee 生成的 JPEG)
 WEBP_CONVERT_DEFAULT = _env_bool("WEBP_CONVERT_DEFAULT", True)
 WEBP_QUALITY = _env_int("WEBP_QUALITY", 80)
+# 相册图片管理: 一次列出的照片上限 / 单次删除上限 / 每次请求删除的照片数
+ALBUM_MANAGE_LIMIT = _env_int("ALBUM_MANAGE_LIMIT", 800)
+ALBUM_DELETE_LIMIT = _env_int("ALBUM_DELETE_LIMIT", 1000)
+ALBUM_DELETE_CHUNK = 200
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -278,20 +286,14 @@ _LYCHEE_VIDEO_SUBTYPE_TO_EXT = {
 }
 
 
-def _transcode_video_to_mp4(data: bytes, ext: str) -> tuple[bytes | None, str]:
-    """用 ffmpeg 把 Lychee 不支持的视频格式(如 mkv)转码为 mp4。
-
-    返回 (mp4 字节, 错误信息)；成功时错误信息为空串。
-    """
-    tmp_in = tmp_out = None
+def _ffmpeg_to_mp4(src: str, ext: str) -> tuple[bytes | None, str]:
+    """把已落盘的视频(src 路径)转码为 mp4 字节。返回 (mp4 字节, 错误信息)。"""
+    tmp_out = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=ext or ".video", delete=False) as f:
-            f.write(data)
-            tmp_in = f.name
         tmp_out = tempfile.mktemp(suffix=".mp4")
         proc = subprocess.run(
             [
-                "ffmpeg", "-y", "-i", tmp_in,
+                "ffmpeg", "-y", "-i", src,
                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                 "-c:a", "aac", "-b:a", "128k",
                 "-movflags", "+faststart",
@@ -308,10 +310,30 @@ def _transcode_video_to_mp4(data: bytes, ext: str) -> tuple[bytes | None, str]:
     except Exception as exc:  # noqa: BLE001
         return None, f"视频转码异常: {exc}"
     finally:
-        for p in (tmp_in, tmp_out):
+        if tmp_out and os.path.exists(tmp_out):
             try:
-                if p and os.path.exists(p):
-                    os.remove(p)
+                os.remove(tmp_out)
+            except OSError:
+                pass
+
+
+def _transcode_video_to_mp4(data: bytes, ext: str) -> tuple[bytes | None, str]:
+    """用 ffmpeg 把 Lychee 不支持的视频格式(如 mkv)转码为 mp4。
+
+    返回 (mp4 字节, 错误信息)；成功时错误信息为空串。
+    """
+    tmp_in = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext or ".video", delete=False) as f:
+            f.write(data)
+            tmp_in = f.name
+        return _ffmpeg_to_mp4(tmp_in, ext)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"视频转码异常: {exc}"
+    finally:
+        if tmp_in and os.path.exists(tmp_in):
+            try:
+                os.remove(tmp_in)
             except OSError:
                 pass
 
@@ -658,12 +680,15 @@ def lychee_upload(
     base: str,
     token: str,
     album_id: str,
-    data: bytes,
+    data: bytes | io.IOBase,
     filename: str,
     content_type: str,
     title: str = "",
 ) -> str:
-    """multipart 方式上传图片字节到指定相册(Lychee v4: POST /api/Photo::add)。"""
+    """multipart 方式把图片/视频上传到指定相册(Lychee v4: POST /api/Photo::add)。
+
+    data 可以是字节，也可以是文件对象(本地大视频流式转发，避免整段进内存)。
+    """
     form = {"albumID": str(album_id)} if album_id else {}
     if title:
         form["title"] = title
@@ -722,6 +747,90 @@ def lychee_delete_photos(base: str, token: str, photo_ids: list[str]) -> None:
         timeout=60,
     )
     _lychee_check(resp)
+
+
+def _lychee_photo_id(photo: dict) -> str:
+    """取照片 ID(兼容 v4 的 id 与旧版大写 ID)。"""
+    for key in ("id", "ID", "photo_id"):
+        value = photo.get(key)
+        if value not in (None, "", 0, "0"):
+            return str(value)
+    return ""
+
+
+def _lychee_photo_size_url(photo: dict, kinds: tuple[str, ...]) -> str | None:
+    """按 kinds 优先级从尺寸变体里取一个 URL(thumb/small/medium/original 等)。"""
+    for vk in ("size_variants", "sizeVariants", "sizes"):
+        variants = photo.get(vk)
+        if not isinstance(variants, dict):
+            continue
+        for key in kinds:
+            value = variants.get(key)
+            if isinstance(value, dict) and isinstance(value.get("url"), str) and value["url"]:
+                return value["url"]
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
+def _lychee_media_abs(base: str, value: str | None) -> str:
+    """把 API 返回的相对媒体地址补全为绝对地址(v4 常返回 uploads/… 相对路径)。"""
+    if not value:
+        return ""
+    return _clean(urljoin(base + "/", value))
+
+
+def lychee_album_photos_detail(base: str, token: str, album_id: str) -> tuple[dict, list[dict]]:
+    """列出相册内照片详情, 供图片管理界面显示缩略图与勾选删除。
+
+    返回 (相册信息, 照片数组)。照片每项含 id/title/type/created_at/thumb/url,
+    thumb 取尽量小的尺寸变体(没有变体时退回原图地址), 均为绝对 URL。
+    超过 ALBUM_MANAGE_LIMIT 张时只返回前若干张, 并在 album["truncated"] 标记。
+    """
+    base = (base or "").rstrip("/")
+    resp = requests.post(
+        f"{base}/api/Album::get",
+        json={"albumID": str(album_id)},
+        headers=_lychee_headers(token),
+        timeout=30,
+    )
+    _lychee_check(resp)
+    data = resp.json()
+
+    album = {"id": str(album_id), "title": "", "count": 0, "truncated": False}
+    if isinstance(data, dict):
+        album["title"] = str(data.get("title") or "")
+
+    photos: list[dict] = []
+    seen: set[str] = set()
+    for photo in _lychee_photo_list(data):
+        pid = _lychee_photo_id(photo)
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        album["count"] += 1
+        if len(photos) >= ALBUM_MANAGE_LIMIT:
+            album["truncated"] = True
+            continue
+        ptype = str(photo.get("type") or photo.get("mime_type") or "").lower()
+        raw_url = _lychee_photo_url(photo)
+        raw_thumb = _lychee_photo_size_url(
+            photo, ("thumb", "thumb2x", "small", "small2x", "medium", "medium2x")
+        ) or raw_url
+        url = _lychee_media_abs(base, raw_url)
+        thumb = _lychee_media_abs(base, raw_thumb)
+        is_video = ptype.startswith("video") or url.lower().endswith(_VIDEO_EXT)
+        photos.append(
+            {
+                "id": pid,
+                "title": str(photo.get("title") or ""),
+                "type": "video" if is_video else "image",
+                "created_at": str(photo.get("created_at") or photo.get("timestamp") or ""),
+                "thumb": thumb,
+                "url": url,
+            }
+        )
+    return album, photos
 
 
 def _transfer_one(
@@ -1184,6 +1293,23 @@ def render_extract(
 # ---------------------------------------------------------------- Flask 路由
 app = Flask(__name__)
 app.json.ensure_ascii = False
+# 本地上传的图片/视频整体走 multipart 请求体，这里给一个硬上限(含边界分隔符余量)
+app.config["MAX_CONTENT_LENGTH"] = (
+    max(MAX_LOCAL_IMAGE_BYTES, MAX_LOCAL_VIDEO_BYTES) + 4 * 1024 * 1024
+)
+
+
+@app.errorhandler(413)
+def _payload_too_large(_exc):
+    """请求体超过上限时返回 JSON，前端能直接把原因显示出来。"""
+    return jsonify(
+        ok=False,
+        error=(
+            "文件过大(上限: 图片 "
+            f"{MAX_LOCAL_IMAGE_BYTES // 1048576}MB / 视频 "
+            f"{MAX_LOCAL_VIDEO_BYTES // 1048576}MB)"
+        ),
+    ), 413
 
 
 @app.get("/")
@@ -1617,6 +1743,171 @@ def api_upload():
     return jsonify(result)
 
 
+# ---------------------------------------------------------------- 本地文件上传
+_LOCAL_IMAGE_EXT = {
+    ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif", ".tif", ".tiff",
+}
+_LOCAL_VIDEO_CTYPE = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/x-m4v",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+    ".ogv": "video/ogg",
+    ".avi": "video/x-msvideo",
+    ".mpg": "video/mpeg",
+    ".wmv": "video/x-ms-wmv",
+}
+
+
+def _local_media_kind(filename: str, content_type: str) -> str:
+    """判定本地上传文件是图片还是视频(先看浏览器给的 MIME, 再按扩展名兜底)。"""
+    ext = os.path.splitext(filename)[1].lower()
+    if (content_type or "").lower().startswith("video/") or ext in _VIDEO_EXT:
+        return "video"
+    return "image"
+
+
+def _fmt_bytes(n: int) -> str:
+    """给大小上限/超限提示用的可读体积, 小于 1MB 时显示 KB 而不是 0MB。"""
+    if n >= 1048576:
+        return f"{n / 1048576:.1f}MB"
+    return f"{max(1, n // 1024)}KB"
+
+
+def _transcode_local_video(stored, ext: str) -> tuple[bytes | None, str]:
+    """把 Lychee 不收的本地视频(mkv 等)先落盘再转码，避免大文件读进内存。"""
+    tmp_in = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext or ".video", delete=False) as fh:
+            stored.save(fh)
+            tmp_in = fh.name
+        return _ffmpeg_to_mp4(tmp_in, ext)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"视频处理异常: {exc}"
+    finally:
+        if tmp_in and os.path.exists(tmp_in):
+            try:
+                os.remove(tmp_in)
+            except OSError:
+                pass
+
+
+def _upload_local_one(
+    stored, album_id: str, base: str, token: str, convert_webp: bool
+) -> dict:
+    """上传单个本地文件到 Lychee 相册，返回结果 dict。"""
+    name = os.path.basename(stored.filename or "upload")
+    ext = os.path.splitext(name)[1].lower()
+    ctype = (stored.mimetype or "").lower()
+    kind = _local_media_kind(name, ctype)
+    limit = MAX_LOCAL_VIDEO_BYTES if kind == "video" else MAX_LOCAL_IMAGE_BYTES
+    size = int(stored.content_length or 0)
+    if size > limit:
+        return {
+            "ok": False,
+            "too_large": True,
+            "error": f"文件 {_fmt_bytes(size)} 超过上限 {_fmt_bytes(limit)}",
+        }
+
+    if kind == "image":
+        if ext and ext not in _LOCAL_IMAGE_EXT and not ctype.startswith("image/"):
+            return {"ok": False, "error": f"不支持的图片格式 {ext or '(无扩展名)'}"}
+        data = stored.read(limit + 1)
+        if len(data) > limit:
+            return {
+                "ok": False,
+                "too_large": True,
+                "error": f"文件超过上限 {_fmt_bytes(limit)}",
+            }
+        probe = _probe(data)
+        if probe is None:
+            return {
+                "ok": False,
+                "error": "不是可识别的图片(HEIC 请在 iPhone 设置 → 相机 → 格式 选「兼容性最好」后重选)",
+            }
+        fmt = probe[1]
+        webp = False
+        if convert_webp:
+            converted = _to_webp(data, fmt)
+            if converted is not None:
+                data = converted
+                ctype = "image/webp"
+                name = os.path.splitext(name)[0] + ".webp"
+                webp = True
+        if not ctype.startswith("image/"):
+            ctype = f"image/{fmt or 'jpeg'}"
+        photo_id = lychee_upload(base, token, album_id, data, name, ctype)
+        return {
+            "ok": True,
+            "photo_id": photo_id,
+            "type": "image",
+            "name": name,
+            "size": len(data),
+            "webp": webp,
+        }
+
+    if ext in _LYCHEE_VIDEO_EXT:
+        # Lychee v4 原生支持(mp4/mov/webm 等, 含 iPhone 拍的 .mov)：原样转发不改名
+        # 传文件对象而不是 bytes：省掉我们自己那份完整拷贝(requests 组体时仍会缓冲一次)
+        stream = stored.stream
+        stream.seek(0, os.SEEK_END)
+        size = size or int(stream.tell())
+        stream.seek(0)
+        ctype = ctype if ctype.startswith("video/") else _LOCAL_VIDEO_CTYPE.get(ext, "video/mp4")
+        photo_id = lychee_upload(base, token, album_id, stream, name, ctype)
+        return {
+            "ok": True,
+            "photo_id": photo_id,
+            "type": "video",
+            "name": name,
+            "size": size,
+            "webp": False,
+        }
+
+    mp4_data, err = _transcode_local_video(stored, ext)
+    if mp4_data is None:
+        return {"ok": False, "error": err}
+    mp4_name = os.path.splitext(name)[0] + ".mp4"
+    photo_id = lychee_upload(base, token, album_id, mp4_data, mp4_name, "video/mp4")
+    return {
+        "ok": True,
+        "photo_id": photo_id,
+        "type": "video",
+        "name": mp4_name,
+        "size": len(mp4_data),
+        "webp": False,
+        "transcoded": True,
+    }
+
+
+@app.post("/api/upload_local")
+def api_upload_local():
+    """上传浏览器本地文件(手机相册/文件选择器)到 Lychee 相册，图片和视频都支持。
+
+    与 /api/upload 的区别：媒体来自客户端 multipart 上传而不是 URL 下载，
+    所以 UPLOAD_METHOD=import 时本接口仍走 multipart(本地文件没有可供 Lychee 拉取的 URL)。
+    一次一个文件，由前端串行提交并显示进度，避免大文件撞上网关超时。
+    """
+    album_id = (request.form.get("album_id") or "").strip()
+    base = (request.form.get("lychee_url") or LYCHEE_URL).strip().rstrip("/")
+    token = (request.form.get("lychee_token") or "").strip() or LYCHEE_TOKEN
+    convert_webp = (request.form.get("convert_webp") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if not (album_id and base and token):
+        return jsonify(ok=False, error="缺少参数(album_id/lychee 配置)"), 400
+    stored = request.files.get("file")
+    if stored is None or not (stored.filename or "").strip():
+        return jsonify(ok=False, error="没有收到文件"), 400
+    result = _upload_local_one(stored, album_id, base, token, convert_webp)
+    if not result.get("ok"):
+        return jsonify(result), 413 if result.get("too_large") else 400
+    return jsonify(result)
+
+
 @app.post("/api/album/clear")
 def api_album_clear():
     """清空指定相册内的全部照片(相册本身保留)。Lychee v4 专用。"""
@@ -1636,6 +1927,55 @@ def api_album_clear():
     except requests.RequestException as exc:
         return jsonify(ok=False, error=f"无法连接 Lychee: {exc.__class__.__name__}"), 502
     return jsonify(ok=True, deleted=len(photos))
+
+
+@app.post("/api/album/photos")
+def api_album_photos():
+    """列出所选相册内的照片(图片管理界面: 展示相册图片 + 勾选删除)。"""
+    body = request.get_json(silent=True) or {}
+    base = (body.get("lychee_url") or LYCHEE_URL).rstrip("/")
+    token = (body.get("lychee_token") or "").strip() or LYCHEE_TOKEN
+    album_id = str(body.get("album_id") or "").strip()
+    if not (base and token and album_id):
+        return jsonify(ok=False, error="缺少参数(lychee 配置/album_id)"), 400
+    try:
+        album, photos = lychee_album_photos_detail(base, token, album_id)
+    except FetchError as exc:
+        return jsonify(ok=False, error=str(exc)), 502
+    except requests.RequestException as exc:
+        return jsonify(ok=False, error=f"无法连接 Lychee: {exc.__class__.__name__}"), 502
+    return jsonify(ok=True, album=album, photos=photos)
+
+
+@app.post("/api/album/photos/delete")
+def api_album_photos_delete():
+    """删除相册内勾选的照片(单选/多选均可, 不可恢复)。"""
+    body = request.get_json(silent=True) or {}
+    base = (body.get("lychee_url") or LYCHEE_URL).rstrip("/")
+    token = (body.get("lychee_token") or "").strip() or LYCHEE_TOKEN
+    album_id = str(body.get("album_id") or "").strip()
+    raw_ids = body.get("photo_ids")
+    if not isinstance(raw_ids, list):
+        return jsonify(ok=False, error="photo_ids 必须是一组照片 ID"), 400
+    ids: list[str] = []
+    for value in raw_ids:
+        pid = str(value).strip()
+        if pid and pid not in ids:
+            ids.append(pid)
+    if not (base and token and album_id):
+        return jsonify(ok=False, error="缺少参数(lychee 配置/album_id)"), 400
+    if not ids:
+        return jsonify(ok=False, error="请先勾选要删除的图片"), 400
+    if len(ids) > ALBUM_DELETE_LIMIT:
+        return jsonify(ok=False, error=f"单次最多删除 {ALBUM_DELETE_LIMIT} 张, 请分批操作"), 400
+    try:
+        for i in range(0, len(ids), ALBUM_DELETE_CHUNK):
+            lychee_delete_photos(base, token, ids[i : i + ALBUM_DELETE_CHUNK])
+    except FetchError as exc:
+        return jsonify(ok=False, error=str(exc)), 502
+    except requests.RequestException as exc:
+        return jsonify(ok=False, error=f"无法连接 Lychee: {exc.__class__.__name__}"), 502
+    return jsonify(ok=True, deleted=len(ids), photo_ids=ids)
 
 
 def _batch_cleanup() -> None:

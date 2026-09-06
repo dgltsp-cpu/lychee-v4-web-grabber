@@ -27,6 +27,13 @@ services:
       # 转存为 WebP(网页端可开关)。质量越低体积越小、画质越差
       WEBP_CONVERT_DEFAULT: "true"
       WEBP_QUALITY: "80"
+      # 相册图片管理面板:单次最多显示多少张 / 单次最多删除多少张
+      ALBUM_MANAGE_LIMIT: "800"
+      ALBUM_DELETE_LIMIT: "1000"
+      # 本地上传(网页端「📷 上传本地图片」)单文件大小上限(字节)
+      # 转发给 Lychee 时 requests 会在内存里组一次 multipart 体, 视频上限不宜调太高
+      MAX_LOCAL_IMAGE_BYTES: "20971520"
+      MAX_LOCAL_VIDEO_BYTES: "104857600"
     # 与 Lychee 桥接在同一 docker 网络,直接用服务名访问
     networks:
       - default
