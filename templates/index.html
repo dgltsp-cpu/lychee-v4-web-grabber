@@ -11,7 +11,23 @@
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: var(--bg); color: var(--text); font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
-    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px 16px 80px; }
+    /* 应用外壳: 顶部固定 + 中部双视图滑动 + 底部固定; 两个界面各自滚动, 互不遮挡 */
+    html, body { height: 100%; }
+    body { overflow: hidden; overscroll-behavior: none; }
+    .wrap {
+      display: flex; flex-direction: column; height: 100vh; height: 100dvh;
+      max-width: 1200px; margin: 0 auto; padding: 14px 16px 0; overflow-y: auto;
+    }
+    header { flex: none; }
+    /* 键盘弹起等极端矮屏时, 内容区先压缩而不是把设置面板顶出屏幕 */
+    .vp { flex: 1 1 auto; min-height: 120px; overflow: hidden; touch-action: pan-y; }
+    .vp-track { display: flex; width: 200%; height: 100%; }
+    .vp-page {
+      width: 50%; flex: none; min-width: 0; overflow-y: auto;
+      touch-action: pan-y;   /* 只把竖向交给滚动, 横向留给切界面手势, 不触发浏览器后退 */
+      -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+      padding: 2px 2px calc(var(--footer-h, 96px) + 18px);
+    }
     header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
     header h1 { font-size: 20px; }
     header .badge { color: var(--muted); font-size: 12px; }
@@ -42,6 +58,19 @@
     .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
     .hint code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
 
+    /* ---- 网址输入 + 扫码识图(纯前端, 图片不出手机) ---- */
+    .url-row { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+    .url-row input[type=url] { flex: 1 1 0; width: auto; min-width: 0; }
+    #qr-btn { flex: none; white-space: nowrap; }
+    #qr-btn:disabled { opacity: .6; cursor: progress; }
+    .url-row input[type=url].qr-filled { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok); }
+    .url-row.qr-drag input[type=url] { border-color: var(--accent); border-style: dashed; }
+    #extract-btn.qr-flash { animation: qr-flash .85s ease 2; }
+    @keyframes qr-flash {
+      0%, 100% { box-shadow: none; }
+      50% { box-shadow: 0 0 0 4px rgba(79, 140, 255, .45); }
+    }
+
     /* ---- Lychee 设置表单 ---- */
     .settings-form { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
@@ -50,6 +79,11 @@
     .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .toolbar .spacer { flex: 1; }
     #extract-btn { font-weight: 600; }
+
+    /* ---- 相册图片管理 ---- */
+    #mgmt-count, #mgmt-tip { color: var(--muted); font-size: 12px; }
+    #mgmt-wrap .item .cb { display: block; }
+    #mgmt-wrap .item.selected { border-color: var(--err); box-shadow: 0 0 0 1px var(--err); }
 
     .meta { color: var(--muted); font-size: 13px; margin: 14px 0 10px; display: flex; gap: 16px; flex-wrap: wrap; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
@@ -83,21 +117,45 @@
       border-top: 1px solid var(--line); padding: 10px 16px; z-index: 10;
     }
     .footer .row { max-width: 1200px; margin: 0 auto; }
+    /* 底栏两页: 「抓取转存」与「相册管理」, 与上方内容区联动, 滑动时整屏一起走 */
+    .ftabs { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .ftab {
+      display: inline-block; font-size: 12px; padding: 3px 12px; border-radius: 20px;
+      background: var(--panel2); color: var(--muted); border: 1px solid var(--line);
+    }
+    .ftab.active { color: var(--text); border-color: var(--accent); }
+    /* --slide 只在 body 上取值: 内容轨道与底栏轨道共用同一个位移, 两屏始终对齐 */
+    body[data-view="1"] { --slide: -50%; }
+    .pager { touch-action: pan-y; max-width: 1200px; margin: 0 auto; overflow: hidden; }
+    .track {
+      display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; width: 200%;
+      transform: translateX(var(--slide, 0%)); transition: transform .24s ease;
+    }
+    .vp-track { transform: translateX(var(--slide, 0%)); transition: transform .26s ease; }
+    /* 手指拖动期间去掉缓动, 两屏严格跟手 */
+    body.dragging .track, body.dragging .vp-track { transition: none; }
+    .page { width: 50%; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .prow { display: contents; }
+    #album-mgmt-select { max-width: 320px; }
     .webp-toggle {
       font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer;
       display: inline-flex; align-items: center; gap: 4px;
     }
-    #progress { flex: 1; height: 6px; background: var(--panel2); border-radius: 4px; overflow: hidden; display: none; }
+    /* 进度条贴在底栏上沿, 不再单独占一行 */
+    #progress { position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--panel2); overflow: hidden; display: none; }
     #progress > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
     #status-text { color: var(--muted); font-size: 13px; min-width: 180px; }
     #summary { padding: 10px; border-radius: 8px; margin-top: 14px; font-size: 13px; display: none; }
     #summary.ok { background: rgba(62,207,142,.12); color: var(--ok); border: 1px solid rgba(62,207,142,.4); }
     #summary.err { background: rgba(255,107,107,.12); color: var(--err); border: 1px solid rgba(255,107,107,.4); }
     #toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); background: var(--err); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; display: none; z-index: 20; max-width: 80vw; }
+    #toast.ok { background: #1f7a52; }
 
     /* ---- 书签 ---- */
     .bm-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
     .bm-bar > b { color: var(--muted); font-size: 12px; }
+    .bm-body .bm-bar { margin-top: 8px; }
+    #bm-count { color: var(--muted); }
     #bm-select { flex: 1; min-width: 0; max-width: 340px; }
     .bm-add { font-size: 12px; padding: 4px 12px; border-radius: 20px; }
     #bm-edit:disabled, #bm-del:disabled { opacity: .4; cursor: not-allowed; }
@@ -108,42 +166,62 @@
 
     /* ---- 移动端优化 ---- */
     @media (max-width: 640px) {
-      .wrap { padding: 12px 10px 96px; }
+      .wrap { padding: 10px 10px 0; }
+      .vp-page { padding: 2px 2px calc(var(--footer-h, 150px) + 14px); }
       header h1 { font-size: 17px; }
       header .badge { width: auto; }
       .header-actions { width: 100%; justify-content: space-between; align-items: center; }
       .settings-btn { flex: none; }
       input[type=url] { min-width: 0; width: 100%; }
       input[type=text], input[type=url], select { font-size: 15px; padding: 10px 12px; }
-      button { font-size: 15px; padding: 10px 14px; }
+      /* 字号与内边距随视口线性缩放: 小屏不挤成一团, 大屏不空旷 */
+      button { font-size: clamp(13px, 3.5vw, 15px); padding: 10px clamp(6px, 2vw, 14px); }
       .row { gap: 8px; }
       .grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
       .thumb-wrap { aspect-ratio: 1 / 1; }
       .alt { font-size: 10px; padding: 5px 6px; }
       .item .cb { width: 22px; height: 22px; }
-      .footer { padding: 8px 10px; }
-      .footer .row { flex-wrap: wrap; gap: 8px; }
-      .footer .row > * { min-width: 0; }
-      #album-select { max-width: 100% !important; width: 100%; }
-      #status-text { min-width: 0; width: 100%; font-size: 12px; }
-      #progress { width: 100%; flex: none; }
+      .footer { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); max-height: 52vh; overflow-y: auto; }
+      .ftab { flex: none; }
+      #status-text { min-width: 0; flex: 1; font-size: 12px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      /* 手机端: 界面内改成纵向堆叠, 按钮撑满一行 */
+      .page { flex-direction: column; align-items: stretch; gap: 8px; }
+      .prow { display: flex; gap: 8px; align-items: center; }
+      /* width:0 + flex:1 让下拉框忽略选项文字宽度, 否则长相册名会撑爆整行 */
+      .prow { min-width: 0; }
+      .prow select { flex: 1 1 0; width: 0; min-width: 0; }
+      .prow .webp-toggle { flex: none; }
+      #album-select, #album-mgmt-select { max-width: none !important; }
+      .prow button { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      /* 按钮行用等分栅格: N 个按钮永远等宽, 再也不会被 nowrap 撑破后被 pager 裁掉 */
+      .prow.btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
+      .prow.btns button { width: 100%; min-width: 0; min-height: 44px; }
+      .footer button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+      /* 没勾选任何图片时不显示转存按钮, 少占一行 */
+      .footer.no-transfer #transfer-row { display: none; }
       #preview-frame { height: 50vh; }
       #bm-select { max-width: 100% !important; width: 100%; flex: none; }
       .bm-bar { gap: 8px; }
       .bm-editor #bm-name { width: 100%; }
       .bm-editor #bm-url { min-width: 0; width: 100%; }
       .actions { flex-direction: column; align-items: stretch; }
-      .actions input[type=url] { width: 100%; }
-      .actions button { width: 100%; }
-      .toolbar button { flex: 1; white-space: nowrap; }
+      /* 网址行撑满一行, 但内部仍是「输入框 + 📷」同一行: 少占高度, 少遮挡 */
+      .actions .url-row { width: 100%; }
+      #qr-btn { padding: 10px 12px; }
+      .toolbar button { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .settings-form .row { flex-direction: column; align-items: stretch; }
       .settings-form input[type=text] { width: 100%; }
       .settings-form #test-btn { width: 100%; }
-      .footer .row > button { flex: 1; }
+    }
+    /* 窄屏(≤400px)用短文案, 宽屏用完整文案; title 里始终保留完整说明 */
+    .t-short { display: none; }
+    @media (max-width: 400px) {
+      .t-long { display: none; }
+      .t-short { display: inline; }
     }
   </style>
 </head>
-<body>
+<body data-view="0">
 <div class="wrap">
   <header>
     <h1>🖼 网页图片抓取 → Lychee</h1>
@@ -166,27 +244,40 @@
     <div class="hint">Token 仅保存在你浏览器的 localStorage 中，请求经过本服务转发，不会出现在 URL 里。</div>
   </div>
 
+  <!-- 两个界面各自独立: 抓取转存视图 / 相册管理视图, 左右滑动整屏切换 -->
+  <div class="vp" id="vp">
+    <div class="vp-track" id="vp-track">
+      <section class="vp-page" id="view-grab" data-active="1">
   <section class="card">
     <h2>抓取网页图片</h2>
     <div class="row actions">
-      <input type="url" id="page-url" placeholder="https://example.com/article/xxx">
-      <button id="preview-btn" title="在下方 iframe 中打开目标网页, 确认内容后再提取">预览网页</button>
-      <button id="extract-btn" class="primary">提取图片</button>
-      <button id="deep-btn" title="用无头浏览器渲染页面并触发懒加载后再提取, 更完整但较慢">深度提取</button>
+      <div class="url-row" id="url-row">
+        <input type="url" id="page-url" placeholder="https://example.com/article/xxx" autocomplete="off">
+        <button id="qr-btn" type="button" title="选一张含二维码的图片, 识别后自动填入网址(图片只在本机解码, 不会上传)">
+          📷 <span class="t-long">扫码</span>
+        </button>
+        <input type="file" id="qr-file" accept="image/*" hidden>
+      </div>
     </div>
-
     <div class="bm-bar">
-      <b>📑 书签</b>
-      <select id="bm-select"><option value="">选择书签…</option></select>
-      <button class="bm-add" id="bm-add">＋ 添加</button>
-      <button id="bm-edit" disabled title="编辑选中的书签">✎ 编辑</button>
-      <button id="bm-del" disabled title="删除选中的书签">× 删除</button>
+      <button class="settings-btn" id="bm-toggle" type="button" title="展开/收起书签列表">
+        📑 书签<span id="bm-count"></span><span id="bm-arrow">▸</span>
+      </button>
     </div>
-    <div class="bm-editor" id="bm-editor">
-      <input type="text" id="bm-name" placeholder="书签名(如: 摄影周刊)">
-      <input type="text" id="bm-url" placeholder="https://example.com/page">
-      <button id="bm-save" class="primary">保存</button>
-      <button id="bm-cancel">取消</button>
+    <!-- 书签面板: 与 Lychee 设置一样默认收起, 点标题才展开 -->
+    <div class="bm-body" id="bm-body" style="display:none">
+      <div class="bm-bar">
+        <select id="bm-select"><option value="">选择书签…</option></select>
+        <button class="bm-add" id="bm-add">＋ 添加</button>
+        <button id="bm-edit" disabled title="编辑选中的书签">✎ 编辑</button>
+        <button id="bm-del" disabled title="删除选中的书签">× 删除</button>
+      </div>
+      <div class="bm-editor" id="bm-editor">
+        <input type="text" id="bm-name" placeholder="书签名(如: 摄影周刊)">
+        <input type="text" id="bm-url" placeholder="https://example.com/page">
+        <button id="bm-save" class="primary">保存</button>
+        <button id="bm-cancel">取消</button>
+      </div>
     </div>
   </section>
 
@@ -223,19 +314,71 @@
   </section>
 
   <div id="summary"></div>
+      </section>
+
+      <section class="vp-page" id="view-mgmt" data-active="0">
+        <section class="card" id="mgmt-wrap" style="display:none">
+          <div class="toolbar">
+            <b id="mgmt-title">🗂 相册图片管理</b>
+            <span id="mgmt-count"></span>
+            <span class="spacer"></span>
+            <button id="mgmt-select-all" title="勾选相册内全部图片">全选</button>
+            <button id="mgmt-select-none">取消全选</button>
+            <button id="mgmt-refresh" title="重新读取相册内的图片">刷新</button>
+            <button id="mgmt-back" title="滑回「📥 抓取转存」界面">↩ 返回抓取</button>
+            <button id="mgmt-delete" class="danger" disabled>删除选中</button>
+          </div>
+          <div class="meta">
+            <span id="mgmt-sel-label">已选 0 张</span>
+            <span id="mgmt-tip">点击缩略图即可勾选，可单选或多选后删除（删除不可恢复）</span>
+          </div>
+          <div class="grid" id="mgmt-grid"></div>
+          <div class="empty" id="mgmt-empty" style="display:none"></div>
+        </section>
+      </section>
+    </div>
+  </div>
 </div>
 
-<div class="footer">
-  <div class="row">
-    <select id="album-select" style="max-width:320px"><option value="">选择目标相册…</option></select>
-    <button id="clear-album-btn" class="danger" disabled title="删除该相册内的全部照片(相册保留,不可恢复)">清空相册</button>
-    <label class="webp-toggle" title="转存时把原图转成 WebP 再上传，体积更小；Lychee 缩略图仍为 JPEG">
-      <input type="checkbox" id="convert-webp" {{ "checked" if default_convert_webp else "" }}> 转存为 WebP
-    </label>
+<div class="footer no-transfer" id="footer" data-page="0">
+  <div id="progress"><i></i></div>
+  <div class="ftabs">
+    <button class="ftab active" id="tab-grab" type="button">📥 抓取转存</button>
+    <button class="ftab" id="tab-mgmt" type="button">🗂 相册管理</button>
     <span id="status-text"></span>
-    <div id="progress"><i></i></div>
-    <button id="upload-btn" class="primary" disabled>转存到 Lychee</button>
-    <button id="batch-btn" class="primary" disabled>后台转存</button>
+  </div>
+  <div class="pager" id="pager">
+    <div class="track" id="pager-track">
+      <div class="page" id="page-grab">
+        <div class="prow">
+          <select id="album-select" style="max-width:320px"><option value="">上传到相册…</option></select>
+          <label class="webp-toggle" title="转存时把原图转成 WebP 再上传，体积更小；Lychee 缩略图仍为 JPEG">
+            <input type="checkbox" id="convert-webp" {{ "checked" if default_convert_webp else "" }}> 转存为 WebP
+          </label>
+        </div>
+        <div class="prow btns">
+          <button id="preview-btn" title="在下方 iframe 中打开目标网页, 确认内容后再提取">预览网页</button>
+          <button id="extract-btn" class="primary" title="提取上方网址页面里的图片/视频">提取图片</button>
+          <button id="deep-btn" title="用无头浏览器渲染页面并触发懒加载后再提取, 更完整但较慢">深度提取</button>
+        </div>
+        <div class="prow btns" id="transfer-row">
+          <button id="upload-btn" class="primary" disabled>转存到 Lychee</button>
+          <button id="batch-btn" class="primary" disabled>后台转存</button>
+        </div>
+      </div>
+      <div class="page" id="page-mgmt">
+        <div class="prow">
+          <select id="album-mgmt-select"><option value="">选择要管理的相册…</option></select>
+        </div>
+        <div class="prow btns">
+          <button id="local-upload-btn" type="button" disabled title="从手机相册/文件选图片或多选视频, 选完直接上传到上面选中的相册">
+            <span class="t-long">📷 上传本地图片</span><span class="t-short">📷 上传</span>
+          </button>
+          <button id="clear-album-btn" class="danger" disabled title="删除该相册内的全部照片(相册保留,不可恢复)">清空相册</button>
+        </div>
+        <input type="file" id="local-files" accept="image/*,video/*" multiple hidden>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -255,13 +398,16 @@ let uploading = false;
 let batching = false;      // 后台转存进行中
 let pollTimer = null;
 let activeBatchId = null;  // 当前后台任务 id
+let localUploading = false; // 本地图片/视频上传进行中
+let localCancel = false;    // 请求取消剩余本地上传
 const KEY_BATCH = "img-grabber.batch_id";
 const KEY_BOOKMARKS = "img-grabber.bookmarks";
 let filter = "all";
 
-function toast(msg) {
+function toast(msg, ok) {
   const t = $("toast");
   t.textContent = msg;
+  t.classList.toggle("ok", !!ok);
   t.style.display = "block";
   clearTimeout(t._timer);
   t._timer = setTimeout(() => (t.style.display = "none"), 5000);
@@ -277,6 +423,19 @@ function settings() {
 
 function settingsConfigured() {
   return !!(localStorage.getItem(KEY_URL) && localStorage.getItem(KEY_TOKEN));
+}
+
+// 底栏按钮触发本界面的结果时, 把它滚进视野; 只滚当前界面, 不跨界面抢视线
+function reveal(id) {
+  const el = $(id);
+  if (!el || el.style.display === "none") return;
+  const page = el.closest(".vp-page");
+  if (page && page.dataset.active === "0") return;
+  const limit = page ? page.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+  const rect = el.getBoundingClientRect();
+  if (rect.top >= limit.bottom - 40 || rect.bottom <= limit.top) {
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 function setSettingsOpen(open) {
@@ -303,11 +462,34 @@ function refreshFooter() {
   const canGo = selected.size && $("album-select").value && !batching;
   $("upload-btn").disabled = !canGo;
   $("batch-btn").disabled = !canGo;
-  $("clear-album-btn").disabled = !$("album-select").value || batching;
+  const mgmtId = $("album-mgmt-select").value;
+  $("clear-album-btn").disabled = !mgmtId || batching || localUploading;
+  // 上传中保持可点(再点一次 = 取消剩余); 未选相册或有转存任务时禁用
+  $("local-upload-btn").disabled = localUploading ? false : (!mgmtId || uploading || batching);
+  // 手机端: 未勾选任何图片时收起转存按钮那一行, 减少遮挡
+  $("footer").classList.toggle("no-transfer", !selected.size && !uploading && !batching);
+}
+
+// 把相册列表填进下拉框(抓取页与管理页各一个, 互不干扰), 尽量保留原选中项
+function fillAlbumSelect(sel, albums, placeholder) {
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const head = document.createElement("option");
+  head.value = "";
+  head.textContent = placeholder;
+  sel.appendChild(head);
+  albums.forEach((a) => {
+    const opt = document.createElement("option");
+    opt.value = a.id;
+    // path 由后端拼好(如「旅行 / 2026」), 旧后端/旧版本无 path 时回退 title
+    opt.textContent = (a.path || a.title) + " (#" + a.id + ")";
+    sel.appendChild(opt);
+  });
+  if (prev && albums.some((a) => String(a.id) === prev)) sel.value = prev;
 }
 
 function showCheckboxes() {
-  document.querySelectorAll(".item").forEach((el) => el.classList.add("show-check"));
+  $("grid").querySelectorAll(".item").forEach((el) => el.classList.add("show-check"));
 }
 
 function render() {
@@ -420,8 +602,8 @@ function render() {
   refreshFooter();
 }
 
-function lazyLoad() {
-  const imgs = document.querySelectorAll("img.thumb");
+function lazyLoad(root) {
+  const imgs = (root || document).querySelectorAll("img.thumb");
   if (!("IntersectionObserver" in window)) {
     imgs.forEach((im) => (im.src = im.dataset.fullUrl));
     return;
@@ -448,6 +630,7 @@ $("preview-btn").addEventListener("click", () => {
     ? "/lp/" + url.replace(/^https?:\/\//, "")
     : "/api/frame?url=" + encodeURIComponent(url);
   $("preview-wrap").style.display = "block";
+  reveal("preview-wrap");
 });
 $("preview-close").addEventListener("click", () => {
   $("preview-wrap").style.display = "none";
@@ -525,6 +708,8 @@ async function runExtract(deep) {
     $("hide-small").checked = false;
     $("gallery-wrap").style.display = "block";
     render();
+    setFooterPage(0);        // 结果属于「抓取转存」界面, 深度提取期间若滑走了自动切回来
+    reveal("gallery-wrap");
   } catch (err) {
     toast(err.message);
   } finally {
@@ -548,17 +733,12 @@ $("test-btn").addEventListener("click", async () => {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "连接失败");
-    const sel = $("album-select");
-    sel.innerHTML = '<option value="">选择目标相册…</option>';
-    data.albums.forEach((a) => {
-      const opt = document.createElement("option");
-      opt.value = a.id;
-      // path 由后端拼好(如「旅行 / 2026」), 旧后端/旧版本无 path 时回退 title
-      opt.textContent = (a.path || a.title) + " (#" + a.id + ")";
-      sel.appendChild(opt);
-    });
+    fillAlbumSelect($("album-select"), data.albums, "上传到相册…");
+    fillAlbumSelect($("album-mgmt-select"), data.albums, "选择要管理的相册…");
     toast("连接成功，共 " + data.albums.length + " 个相册");
     refreshFooter();
+    // 已经停在「相册管理」页时, 连上就自动把面板打开
+    if (footerPage === 1) maybeOpenMgmt(true);
     setSettingsOpen(false);
   } catch (err) {
     toast(err.message);
@@ -568,12 +748,17 @@ $("test-btn").addEventListener("click", async () => {
   }
 });
 
+// 抓取页选相册 = 上传目标; 管理页选相册才会加载相册内的图片
 $("album-select").addEventListener("change", refreshFooter);
+$("album-mgmt-select").addEventListener("change", () => {
+  refreshFooter();
+  loadMgmt();
+});
 
 $("clear-album-btn").addEventListener("click", async () => {
-  const albumId = $("album-select").value;
-  if (!albumId) return toast("请先选择目标相册");
-  const opt = $("album-select").selectedOptions[0];
+  const albumId = $("album-mgmt-select").value;
+  if (!albumId) return toast("请先选择要管理的相册");
+  const opt = $("album-mgmt-select").selectedOptions[0];
   const label = opt ? opt.textContent : albumId;
   if (!confirm(`确定清空相册「${label}」内的全部照片吗？此操作不可恢复！`)) return;
   const btn = $("clear-album-btn");
@@ -587,12 +772,595 @@ $("clear-album-btn").addEventListener("click", async () => {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "清空失败");
     toast(`已清空 ${data.deleted} 张照片`);
+    mgmtSelected = new Set();
+    refreshMgmtIfOpen();
   } catch (err) {
     toast(err.message);
   } finally {
     btn.disabled = false;
   }
 });
+
+// ---------------- 相册图片管理（显示所选相册内的图片，支持单选/多选删除） ----------------
+let mgmtPhotos = [];
+let mgmtSelected = new Set();
+let mgmtAlbumId = "";
+let mgmtLoading = false;
+let mgmtLoadedAt = 0;       // 上次成功读取相册的时间, 来回滑动时据此少打 Lychee
+let mgmtStale = false;      // 面板不在当前界面时收到新数据, 滑回来再刷新
+
+function mgmtProxyUrl(target) {
+  return "/api/proxy?url=" + encodeURIComponent(target || "") + "&allow_private=1";
+}
+
+function mgmtVisible() {
+  return $("mgmt-wrap").style.display === "block";
+}
+
+function mgmtSetDeleteLabel() {
+  const n = mgmtSelected.size;
+  $("mgmt-delete").textContent = n ? "删除选中 " + n + " 张" : "删除选中";
+  $("mgmt-delete").disabled = !n || mgmtLoading;
+  $("mgmt-sel-label").textContent = "已选 " + n + " 张";
+}
+
+function renderMgmt() {
+  const grid = $("mgmt-grid");
+  grid.innerHTML = "";
+  if (!mgmtPhotos.length) {
+    const box = $("mgmt-empty");
+    if (!box.dataset.msg) box.textContent = "该相册里还没有图片。";
+    box.style.display = "block";
+    mgmtSetDeleteLabel();
+    return;
+  }
+  $("mgmt-empty").style.display = "none";
+  delete $("mgmt-empty").dataset.msg;
+
+  mgmtPhotos.forEach((p) => {
+    const el = document.createElement("div");
+    el.className = "item show-check" + (mgmtSelected.has(p.id) ? " selected" : "");
+
+    const wrap = document.createElement("div");
+    wrap.className = "thumb-wrap";
+
+    let media;
+    if (p.type === "video") {
+      media = document.createElement("video");
+      media.controls = true;
+      media.preload = "metadata";
+      media.muted = true;
+      media.className = "thumb";
+      media.src = "/api/proxy_stream?url=" +
+        encodeURIComponent(p.url || p.thumb || "") + "&allow_private=1";
+      const dim = document.createElement("span");
+      dim.className = "dim";
+      dim.textContent = "🎬 视频";
+      el.appendChild(dim);
+    } else {
+      media = document.createElement("img");
+      media.className = "thumb ph";
+      media.loading = "lazy";
+      media.alt = p.title || "图片";
+      media.dataset.fullUrl = mgmtProxyUrl(p.thumb || p.url);
+      media.onload = () => media.classList.remove("ph");
+      media.onerror = () => media.classList.remove("ph");
+      media.addEventListener("click", () => cb.click());
+    }
+    wrap.appendChild(media);
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "cb";
+    cb.checked = mgmtSelected.has(p.id);
+    cb.title = "ID: " + p.id;
+    cb.addEventListener("change", () => {
+      if (mgmtSelected.has(p.id)) mgmtSelected.delete(p.id);
+      else mgmtSelected.add(p.id);
+      el.classList.toggle("selected", cb.checked);
+      mgmtSetDeleteLabel();
+    });
+
+    const alt = document.createElement("div");
+    alt.className = "alt";
+    alt.textContent = p.title || p.id;
+    alt.title = "ID: " + p.id + (p.created_at ? "\n上传时间: " + p.created_at : "");
+
+    el.append(wrap, cb, alt);
+    grid.appendChild(el);
+  });
+  mgmtSetDeleteLabel();
+  lazyLoad(grid);
+}
+
+async function loadMgmt() {
+  const sel = $("album-mgmt-select");
+  const albumId = sel.value;
+  if (!albumId) return showMgmtPlaceholder();   // 管理界面不留空白: 显示操作引导
+  if (mgmtLoading) return;
+  mgmtLoading = true;
+  const opt = sel.selectedOptions[0];
+  const wasHidden = $("mgmt-wrap").style.display !== "block";
+  $("mgmt-wrap").style.display = "block";
+  if (wasHidden) reveal("mgmt-wrap");
+  $("mgmt-title").textContent = "🗂 相册图片管理：" + ((opt && opt.textContent) || albumId);
+  $("mgmt-count").textContent = "读取中…";
+  $("mgmt-empty").style.display = "none";
+  try {
+    const res = await fetch("/api/album/photos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...settings(), album_id: albumId }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "读取相册图片失败");
+    mgmtPhotos = data.photos || [];
+    mgmtAlbumId = albumId;
+    mgmtLoadedAt = Date.now();
+    mgmtStale = false;
+    mgmtSelected = new Set();
+    delete $("mgmt-empty").dataset.msg;   // 清掉引导/失败标记, 空相册才能显示「该相册还没有图片」
+    const count = (data.album && data.album.count) || mgmtPhotos.length;
+    $("mgmt-count").textContent =
+      "共 " + count + " 张" +
+      (data.album && data.album.truncated ? "（面板仅显示前 " + mgmtPhotos.length + " 张）" : "");
+    renderMgmt();
+  } catch (err) {
+    mgmtPhotos = [];
+    renderMgmt();
+    const box = $("mgmt-empty");
+    box.dataset.msg = "1";
+    box.textContent = "读取失败：" + err.message;
+    box.style.display = "block";
+    $("mgmt-count").textContent = "读取失败";
+  } finally {
+    mgmtLoading = false;
+  }
+}
+
+function refreshMgmtIfOpen() {
+  const albumId = $("album-mgmt-select").value;
+  if (!albumId || albumId !== mgmtAlbumId) return;
+  // 人不在管理界面时不抢视线, 只打脏标记, 滑回来再刷新
+  if (footerPage === 1 && mgmtVisible()) loadMgmt();
+  else mgmtStale = true;
+}
+
+$("mgmt-refresh").addEventListener("click", loadMgmt);
+$("mgmt-select-all").addEventListener("click", () => {
+  mgmtSelected = new Set(mgmtPhotos.map((p) => p.id));
+  renderMgmt();
+});
+$("mgmt-select-none").addEventListener("click", () => {
+  mgmtSelected = new Set();
+  renderMgmt();
+});
+$("mgmt-back").addEventListener("click", () => setFooterPage(0));
+$("mgmt-delete").addEventListener("click", async () => {
+  const albumId = $("album-mgmt-select").value || mgmtAlbumId;
+  const ids = [...mgmtSelected];
+  if (!albumId) return toast("请先选择相册");
+  if (!ids.length) return toast("请先勾选要删除的图片");
+  const names = ids
+    .slice(0, 3)
+    .map((id) => {
+      const p = mgmtPhotos.find((x) => x.id === id);
+      return p ? p.title || p.id : id;
+    })
+    .join("、");
+  if (!confirm("确定删除选中的 " + ids.length + " 张图片吗（" + names +
+    (ids.length > 3 ? " 等" : "") + "）？\n此操作不可恢复！")) return;
+  const btn = $("mgmt-delete");
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "删除中…";
+  try {
+    const res = await fetch("/api/album/photos/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...settings(), album_id: albumId, photo_ids: ids }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "删除失败");
+    toast("已删除 " + data.deleted + " 张图片");
+    mgmtSelected = new Set();
+    await loadMgmt();
+  } catch (err) {
+    toast(err.message);
+    btn.textContent = label;
+    mgmtSetDeleteLabel();
+  }
+});
+
+// ---------------- 两个独立界面: 抓取转存 / 相册管理（整屏左右滑动切换） ----------------
+let footerPage = 0;
+
+// 切换界面: 底栏按钮、内容区、inert 三处状态一起走, 保证不会出现混显
+function setFooterPage(index) {
+  footerPage = index === 1 ? 1 : 0;
+  const footer = $("footer");
+  footer.dataset.page = String(footerPage);
+  document.body.dataset.view = String(footerPage);   // CSS 靠它移动 --slide, 整屏滑动
+  $("tab-grab").classList.toggle("active", footerPage === 0);
+  $("tab-mgmt").classList.toggle("active", footerPage === 1);
+  $("tab-grab").setAttribute("aria-selected", footerPage === 0 ? "true" : "false");
+  $("tab-mgmt").setAttribute("aria-selected", footerPage === 1 ? "true" : "false");
+  // 内容区与底栏的另一个界面都置为 inert: 看不见的东西不该被 Tab 到或点到
+  [["view-grab", "page-grab"], ["view-mgmt", "page-mgmt"]].forEach((ids, i) => {
+    ids.forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      el.dataset.active = i === footerPage ? "1" : "0";
+      if ("inert" in el) el.inert = i !== footerPage;
+    });
+  });
+  // 滑到「相册管理」界面才加载/显示管理面板; 抓图界面永远不出现它
+  if (footerPage === 1) {
+    // 已配好且相册列表已加载时, 进管理界面顺手收起设置面板, 把屏幕留给照片
+    if ($("album-mgmt-select").options.length > 1) setSettingsOpen(false);
+    maybeOpenMgmt();
+  }
+}
+
+$("tab-grab").addEventListener("click", () => setFooterPage(0));
+$("tab-mgmt").addEventListener("click", () => setFooterPage(1));
+
+// 横向滑动切界面; 以竖向为主的滑动交还给本界面滚动, 避免误触。
+// 位移写在 body 的 --slide 上, 底栏轨道与内容轨道共用, 所以两屏始终对齐。
+function bindSlidePager(zone) {
+  if (!zone) return;
+  let x0 = 0, y0 = 0, dx = 0, dragging = false;
+
+  zone.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    x0 = e.touches[0].clientX;
+    y0 = e.touches[0].clientY;
+    dx = 0;
+    dragging = false;
+  }, { passive: true });
+
+  zone.addEventListener("touchmove", (e) => {
+    if (e.touches.length !== 1) return;
+    const mx = e.touches[0].clientX - x0;
+    const my = e.touches[0].clientY - y0;
+    if (!dragging) {
+      if (Math.abs(mx) < 12 || Math.abs(mx) < Math.abs(my) * 1.4) return;
+      dragging = true;
+      document.body.classList.add("dragging");
+    }
+    dx = mx;
+    const width = zone.clientWidth || 1;
+    const base = footerPage ? -50 : 0;
+    const offset = Math.max(-50, Math.min(0, base + (dx / width) * 50));
+    document.body.style.setProperty("--slide", offset + "%");
+  }, { passive: true });
+
+  const finish = () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.classList.remove("dragging");
+    document.body.style.removeProperty("--slide");   // 交还给 data-view 规则决定停靠位置
+    if (dx < -40) setFooterPage(1);
+    else if (dx > 40) setFooterPage(0);
+  };
+  zone.addEventListener("touchend", finish);
+  zone.addEventListener("touchcancel", finish);
+}
+bindSlidePager($("pager"));
+bindSlidePager($("vp"));
+
+// 进入相册管理界面 = 自动打开图片管理面板。同一相册 60 秒内重复进入不重新请求 Lychee。
+const MGMT_CACHE_MS = 60000;
+
+function showMgmtPlaceholder() {
+  if (footerPage !== 1) return;                // 只在「相册管理」界面里出现
+  $("mgmt-title").textContent = "🗂 相册图片管理";
+  $("mgmt-count").textContent = "";
+  $("mgmt-grid").innerHTML = "";
+  // 只在「没选相册」时被调用: 顺手清掉上一次的照片列表与勾选, 避免误删旧相册
+  mgmtPhotos = [];
+  mgmtAlbumId = "";
+  mgmtSelected = new Set();
+  mgmtSetDeleteLabel();
+  const box = $("mgmt-empty");
+  const s = settings();
+  box.textContent = s.lychee_url && s.lychee_token
+    ? "选择相册后，这里会自动列出相册内的图片和视频，可勾选后单选或多选删除"
+    : "先在上方「Lychee 设置」填好地址与 API Token 并连接测试，即可管理相册";
+  box.dataset.msg = "1";
+  box.style.display = "block";
+  $("mgmt-wrap").style.display = "block";
+  reveal("mgmt-wrap");
+}
+
+function maybeOpenMgmt(force) {
+  if (footerPage !== 1) return;
+  const albumId = $("album-mgmt-select").value;
+  if (!albumId) return showMgmtPlaceholder();
+  const fresh =
+    mgmtVisible() && mgmtAlbumId === albumId && !mgmtStale &&
+    Date.now() - mgmtLoadedAt < MGMT_CACHE_MS;
+  if (!force && fresh) return;
+  loadMgmt();
+}
+
+// ---------------- 上传本地图片 / 视频（相册管理页，选完直接上传） ----------------
+const LOCAL_UPLOAD_IDLE_HTML =
+  '<span class="t-long">📷 上传本地图片</span><span class="t-short">📷 上传</span>';
+const LOCAL_MAX_FILES = 50;
+
+$("local-upload-btn").addEventListener("click", () => {
+  if (localUploading) {
+    localCancel = true;
+    return toast("正在取消剩余上传…");
+  }
+  if (uploading || batching) return toast("已有转存任务在进行，请稍后再上传");
+  if (!$("album-mgmt-select").value) return toast("请先选择相册");
+  const s = settings();
+  if (!s.lychee_url || !s.lychee_token) return toast("请先填写 Lychee 地址和 API Token");
+  $("local-files").value = "";
+  $("local-files").click();
+});
+
+$("local-files").addEventListener("change", () => {
+  const files = Array.from($("local-files").files || []);
+  $("local-files").value = "";
+  if (files.length) startLocalUpload(files);
+});
+
+// 单个文件用 XHR 上传: fetch 读不到上传进度, 这里要按字节显示百分比
+function uploadOneLocal(file, albumId, onPart) {
+  return new Promise((resolve, reject) => {
+    const s = settings();
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    fd.append("album_id", albumId);
+    fd.append("convert_webp", $("convert-webp").checked ? "1" : "0");
+    fd.append("lychee_url", s.lychee_url);
+    fd.append("lychee_token", s.lychee_token);
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload_local", true);
+    xhr.timeout = 900000;
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onPart) onPart(Math.min(1, e.loaded / e.total));
+    };
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch (err) { /* 网关错误页等非 JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300 && data && data.ok) resolve(data);
+      else reject(new Error((data && data.error) || "HTTP " + xhr.status));
+    };
+    xhr.onerror = () => reject(new Error("网络中断或服务器无响应"));
+    xhr.ontimeout = () => reject(new Error("上传超时"));
+    xhr.onabort = () => reject(new Error("已取消"));
+    xhr.send(fd);
+  });
+}
+
+async function startLocalUpload(files) {
+  if (localUploading) return;
+  const albumId = $("album-mgmt-select").value;
+  if (!albumId) return toast("请先选择相册");
+  let list = files;
+  if (list.length > LOCAL_MAX_FILES) {
+    toast("单次最多 " + LOCAL_MAX_FILES + " 个文件，只上传前 " + LOCAL_MAX_FILES + " 个");
+    list = list.slice(0, LOCAL_MAX_FILES);
+  }
+  localUploading = true;
+  localCancel = false;
+  const btn = $("local-upload-btn");
+  btn.textContent = "⏹ 取消上传";
+  refreshFooter();
+  $("summary").style.display = "none";
+  const progress = $("progress");
+  const bar = progress.querySelector("i");
+  progress.style.display = "block";
+  let ok = 0;
+  let fail = 0;
+  let cancelled = 0;
+  let webpCount = 0;
+  // 串行逐个上传: 一次打包大文件容易撞上网关超时, 串行还能自然出进度
+  for (let i = 0; i < list.length; i++) {
+    if (localCancel) { cancelled = list.length - i; break; }
+    const file = list[i];
+    const label = (file.type || "").indexOf("video/") === 0 ? "上传视频 " : "上传 ";
+    $("status-text").textContent = label + (i + 1) + "/" + list.length + " · " + file.name;
+    try {
+      const data = await uploadOneLocal(file, albumId, (pct) => {
+        bar.style.width = (((i + pct) / list.length) * 100).toFixed(1) + "%";
+      });
+      ok++;
+      if (data.webp) webpCount++;
+    } catch (err) {
+      if (err.message === "已取消") { cancelled = list.length - i; break; }
+      fail++;
+      toast(file.name + " 失败：" + err.message);
+    }
+    bar.style.width = (((i + 1) / list.length) * 100).toFixed(1) + "%";
+  }
+  const summary = $("summary");
+  summary.className = ok && !fail ? "ok" : "err";
+  summary.style.display = "block";
+  summary.textContent = ok
+    ? "本地上传完成: 成功 " + ok + " 个" +
+      (webpCount ? "（" + webpCount + " 个已转 WebP）" : "") +
+      (fail ? "，失败 " + fail + " 个" : "") +
+      (cancelled ? "，已取消 " + cancelled + " 个" : "")
+    : (cancelled ? "已取消本地上传" : "本地上传全部失败，详见上方提示");
+  $("status-text").textContent = ok ? "上传完成" : (cancelled ? "已取消" : "上传失败");
+  progress.style.display = "none";
+  localUploading = false;
+  localCancel = false;
+  btn.innerHTML = LOCAL_UPLOAD_IDLE_HTML;
+  refreshFooter();
+  reveal("summary");
+  if (ok) {
+    mgmtLoadedAt = 0;
+    if (footerPage === 1) await loadMgmt();   // 在管理界面就直接刷新列表
+    else mgmtStale = true;                     // 否则滑回来时再刷新
+  }
+  toast(ok ? "已上传 " + ok + " 个文件到相册" : "上传失败");
+}
+
+/* ---------------- 二维码识别: 图片只在本机 canvas 解码, 不经过服务器 ---------------- */
+// 首次点「扫码」才动态加载 /static/qr.js, 平时不占手机端流量与解析时间
+let qrLib = null;
+let qrBusy = false;
+const QR_EDGES = [1600, 720];   // 先按长边 1600 解, 失败再缩小重试(第二轮含反色图)
+
+function loadQrLib() {
+  if (typeof window.jsQR === "function") return Promise.resolve();
+  if (!qrLib) {
+    qrLib = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "/static/qr.js";
+      s.onload = () => (typeof window.jsQR === "function" ? resolve() : reject(new Error("二维码库异常")));
+      s.onerror = () => { qrLib = null; reject(new Error("二维码库加载失败，请刷新页面重试")); };
+      document.head.appendChild(s);
+    });
+  }
+  return qrLib;
+}
+
+function qrImageData(img, maxEdge) {
+  const w0 = img.naturalWidth || img.width;
+  const h0 = img.naturalHeight || img.height;
+  if (!w0 || !h0) return null;
+  const k = Math.min(1, maxEdge / Math.max(w0, h0));
+  const w = Math.max(1, Math.round(w0 * k));
+  const h = Math.max(1, Math.round(h0 * k));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, w, h);
+  try { return ctx.getImageData(0, 0, w, h); } catch (err) { return null; }
+}
+
+function qrImgElement(file) {
+  return new Promise((resolve, reject) => {
+    const src = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(src); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(src); reject(new Error("图片解码失败(格式可能不受支持)")); };
+    img.src = src;
+  });
+}
+
+// createImageBitmap 更快且能读 iOS 的 HEIC; 不支持时回退到 <img>
+function qrLoadImage(file) {
+  return "createImageBitmap" in window
+    ? createImageBitmap(file).catch(() => qrImgElement(file))
+    : qrImgElement(file);
+}
+
+async function qrDecode(file) {
+  await loadQrLib();
+  const img = await qrLoadImage(file);
+  try {
+    for (let i = 0; i < QR_EDGES.length; i++) {
+      const data = qrImageData(img, QR_EDGES[i]);
+      if (!data) continue;
+      const res = window.jsQR(data.data, data.width, data.height,
+        { inversionAttempts: i ? "attemptBoth" : "dontInvert" });
+      if (res && res.data) return res.data;
+    }
+    return "";
+  } finally {
+    if (img.close) img.close();
+  }
+}
+
+// 只接受 http(s) 网址; 裸域名/IP 自动补 http://, 其它协议(weixin:// 等)视为无效
+function qrToUrl(text) {
+  const raw = (text || "").trim();
+  if (/^https?:\/\/\S+$/i.test(raw)) return raw;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) return "";
+  if (/^(?:\d{1,3}(?:\.\d{1,3}){3}|[A-Za-z][\w-]*(?:\.[\w-]+)+)(?::\d{2,5})?(?:[/?#]\S*)?$/.test(raw)) {
+    return "http://" + raw;
+  }
+  return "";
+}
+
+async function handleQrFile(file) {
+  if (!file) return;
+  if (qrBusy) return toast("正在识别上一张，请稍候");
+  if (file.type && file.type.indexOf("image/") !== 0) return toast("请选择图片文件");
+  qrBusy = true;
+  const btn = $("qr-btn");
+  const label = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = "识别中…";
+  try {
+    const text = await qrDecode(file);
+    if (!text) return toast("没识别到二维码，换张更清晰/更正的图片试试");
+    const url = qrToUrl(text);
+    if (!url) return toast("二维码内容不是网址: " + text.slice(0, 40));
+    const input = $("page-url");
+    input.value = url;
+    input.classList.add("qr-filled");
+    setTimeout(() => input.classList.remove("qr-filled"), 2600);
+    reveal("page-url");
+    const eb = $("extract-btn");
+    eb.classList.remove("qr-flash");
+    void eb.offsetWidth;          // 重启动画, 连续扫码也能看到高亮
+    eb.classList.add("qr-flash");
+    toast("已识别网址: " + url.slice(0, 56) + " — 点「提取图片」开始", true);
+  } catch (err) {
+    toast(err.message || "识别失败");
+  } finally {
+    qrBusy = false;
+    btn.disabled = false;
+    btn.innerHTML = label;
+  }
+}
+
+$("qr-btn").addEventListener("click", () => {
+  $("qr-file").value = "";
+  $("qr-file").click();
+});
+$("qr-file").addEventListener("change", () => {
+  const file = ($("qr-file").files || [])[0];
+  $("qr-file").value = "";
+  handleQrFile(file);
+});
+// 桌面端快捷路径: 图片拖到网址行, 或直接 ⌘V 粘贴截图
+(function bindQrShortcuts() {
+  const zone = $("url-row");
+  const hasFiles = (e) => !!e.dataTransfer &&
+    Array.from(e.dataTransfer.types || []).indexOf("Files") >= 0;
+  ["dragenter", "dragover"].forEach((ev) => zone.addEventListener(ev, (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    zone.classList.add("qr-drag");
+  }));
+  ["dragleave", "dragend", "drop"].forEach((ev) =>
+    zone.addEventListener(ev, () => zone.classList.remove("qr-drag")));
+  zone.addEventListener("drop", (e) => {
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    e.preventDefault();
+    handleQrFile(file);
+  });
+  document.addEventListener("paste", (e) => {
+    const files = e.clipboardData && e.clipboardData.files;
+    if (!files || !files.length) return;                 // 纯文字粘贴不受影响
+    const t = e.target;
+    if (t && t.tagName === "INPUT" && t.id !== "page-url") return;
+    e.preventDefault();
+    handleQrFile(files[0]);
+  });
+})();
+
+// 底栏高度随内容变化, 正文留白跟着走: 既不遮挡内容, 也不留多余空白
+(function syncFooterHeight() {
+  const footer = $("footer");
+  const apply = () =>
+    document.documentElement.style.setProperty("--footer-h", footer.offsetHeight + "px");
+  if ("ResizeObserver" in window) new ResizeObserver(apply).observe(footer);
+  window.addEventListener("resize", apply);
+  apply();
+})();
 
 $("select-all").addEventListener("click", () => {
   selected = new Set(visibleIndexes());
@@ -618,7 +1386,7 @@ $("type-filter").addEventListener("change", () => {
 });
 $("hide-small").addEventListener("change", () => {
   const hide = $("hide-small").checked;
-  document.querySelectorAll(".item").forEach((el) => {
+  $("grid").querySelectorAll(".item").forEach((el) => {
     const dim = el.querySelector(".dim");
     const w = dim ? parseInt(dim.textContent) : 0;
     if (hide && w && w < HIDE_SMALL) el.style.display = "none";
@@ -689,6 +1457,7 @@ $("upload-btn").addEventListener("click", async () => {
   uploading = false;
   $("upload-btn").disabled = false;
   refreshFooter();
+  if (okCount) refreshMgmtIfOpen();
   toast(okCount ? "转存完成: " + okCount + " 张成功" : "转存失败");
 });
 
@@ -728,6 +1497,7 @@ function updateBatchProgress(task) {
     summary.textContent = okC
       ? "后台转存完成: 成功 " + okC + " 张" + (failC ? "，失败 " + failC + " 张(可查看各图右上角提示)" : "")
       : "后台转存全部失败: " + failC + " 张";
+    if (okC) refreshMgmtIfOpen();
   }
 }
 
@@ -872,10 +1642,21 @@ function updateBmButtons() {
   $("bm-del").disabled = !bm;
 }
 
+/* 书签面板折叠: 与 Lychee 设置同一套交互(默认收起, 点标题展开) */
+function setBmOpen(open) {
+  $("bm-body").style.display = open ? "" : "none";
+  $("bm-arrow").textContent = open ? "▾" : "▸";
+}
+
+$("bm-toggle").addEventListener("click", () => {
+  setBmOpen($("bm-body").style.display === "none");
+});
+
 function renderBookmarks() {
   const sel = $("bm-select");
   const prev = sel.value;
   sel.innerHTML = "";
+  $("bm-count").textContent = bookmarks.length ? " (" + bookmarks.length + ")" : "";
   if (!bookmarks.length) {
     const opt = document.createElement("option");
     opt.value = "";
@@ -963,6 +1744,7 @@ renderBookmarks();
 })();
 
 (function init() {
+  setFooterPage(0);   // 两个界面从一开始就互斥, 起始停在「抓取转存」
   $("lychee-url").value = localStorage.getItem(KEY_URL) || "{{ default_lychee_url }}";
   $("lychee-token").value = localStorage.getItem(KEY_TOKEN) || "{{ default_lychee_token }}";
   $("convert-webp").checked = localStorage.getItem(KEY_WEBP) !== "0";
