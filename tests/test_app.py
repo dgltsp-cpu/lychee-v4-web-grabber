@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import pathlib
 import sys
 import threading
@@ -512,6 +513,105 @@ def test_upload_rejects_non_video(client, monkeypatch):
     assert resp.get_json()["ok"] is False
 
 
+# ---------------------------------------------------------------- 本地文件上传
+def _post_local(client, file_tuple, form=None):
+    data = {"album_id": "3", "lychee_url": "http://lychee", "lychee_token": "t"}
+    data.update(form or {})
+    data["file"] = file_tuple
+    return client.post("/api/upload_local", data=data, content_type="multipart/form-data")
+
+
+def test_upload_local_image(client, monkeypatch):
+    seen = {}
+
+    def fake_upload(base, token, album_id, data, filename, content_type, title=""):
+        seen.update(album_id=album_id, data=data, filename=filename, content_type=content_type)
+        return "77"
+
+    monkeypatch.setattr(grabber, "lychee_upload", fake_upload)
+    resp = _post_local(client, (io.BytesIO(PNG), "照片.png"))
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["ok"] is True and data["photo_id"] == "77" and data["type"] == "image"
+    assert seen["album_id"] == "3"
+    assert seen["data"] == PNG
+    assert seen["filename"] == "照片.png"
+    assert seen["content_type"].startswith("image/")
+
+
+def test_upload_local_image_converts_webp(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        grabber,
+        "lychee_upload",
+        lambda *a, **k: seen.update(data=a[3], filename=a[4], content_type=a[5]) or "78",
+    )
+    resp = _post_local(client, (io.BytesIO(PNG), "a.png"), {"convert_webp": "1"})
+    data = resp.get_json()
+    assert data["ok"] is True and data["webp"] is True
+    assert seen["filename"] == "a.webp"
+    assert seen["content_type"] == "image/webp"
+    assert grabber._probe(seen["data"])[1] == "webp"
+
+
+def test_upload_local_video_passthrough(client, monkeypatch):
+    """iPhone 拍的 .mov 是 Lychee v4 原生支持的容器, 直接转发不改名不转码。"""
+    seen = {}
+    monkeypatch.setattr(
+        grabber,
+        "lychee_upload",
+        lambda *a, **k: seen.update(data=a[3], filename=a[4], content_type=a[5]) or "99",
+    )
+    resp = _post_local(client, (io.BytesIO(b"FAKE-MOV-DATA"), "IMG_0001.MOV"))
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["ok"] is True and data["type"] == "video" and data["photo_id"] == "99"
+    assert seen["filename"] == "IMG_0001.MOV"
+    assert seen["content_type"] == "video/quicktime"
+    assert not isinstance(seen["data"], bytes), "视频应流式转发文件对象, 不整段读进内存"
+
+
+def test_upload_local_video_transcodes_unsupported_ext(client, monkeypatch):
+    monkeypatch.setattr(grabber, "_transcode_local_video", lambda stored, ext: (b"MP4-BYTES", ""))
+    monkeypatch.setattr(grabber, "lychee_upload", lambda *a, **k: "100")
+    resp = _post_local(client, (io.BytesIO(b"matroska-head"), "clip.mkv"))
+    data = resp.get_json()
+    assert data["ok"] is True and data["type"] == "video"
+    assert data["name"] == "clip.mp4" and data["transcoded"] is True
+
+
+def test_upload_local_rejects_non_media(client, monkeypatch):
+    monkeypatch.setattr(grabber, "lychee_upload", lambda *a, **k: "nope")
+    resp = _post_local(client, (io.BytesIO(b"just some text"), "notes.txt"))
+    assert resp.status_code == 400
+    assert resp.get_json()["ok"] is False
+
+
+def test_upload_local_rejects_fake_image(client, monkeypatch):
+    monkeypatch.setattr(grabber, "lychee_upload", lambda *a, **k: "nope")
+    resp = _post_local(client, (io.BytesIO(b"not an image"), "pic.jpg"))
+    assert resp.status_code == 400
+    assert "图片" in resp.get_json()["error"]
+
+
+def test_upload_local_rejects_oversize(client, monkeypatch):
+    monkeypatch.setattr(grabber, "MAX_LOCAL_IMAGE_BYTES", 16)
+    monkeypatch.setattr(grabber, "lychee_upload", lambda *a, **k: "nope")
+    resp = _post_local(client, (io.BytesIO(PNG), "big.png"))
+    assert resp.status_code == 413
+    assert resp.get_json()["ok"] is False
+
+
+def test_upload_local_requires_album_and_config(client):
+    resp = client.post(
+        "/api/upload_local",
+        data={"file": (io.BytesIO(PNG), "a.png")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+    assert "album_id" in resp.get_json()["error"]
+
+
 # ---------------------------------------------------------------- 后台转存
 def _wait_batch(client, task_id, timeout=10):
     import time as _t
@@ -788,3 +888,347 @@ def test_batch_passes_convert_webp(client, monkeypatch):
     assert task is not None
     assert task["done"] == 1
     assert seen == [True]
+
+
+# ---------------------------------------------------------------- 相册图片管理
+def test_album_photos_detail_against_mock_lychee(site):
+    """真实走 HTTP：相对媒体地址补全为绝对地址，缩略图取最小尺寸变体。"""
+    album, photos = grabber.lychee_album_photos_detail(site, "tok", "AbC1234567890XyZ")
+    assert album["id"] == "AbC1234567890XyZ"
+    assert album["title"] == "v4 album"
+    assert album["count"] == 2
+    assert album["truncated"] is False
+    # Pv1 是 video/quicktime，缩略图退回 small 变体，原图是 .MOV
+    assert photos[0]["id"] == "Pv1"
+    assert photos[0]["type"] == "video"
+    assert photos[0]["thumb"] == f"{site}/uploads/small/xx/abc.jpeg"
+    assert photos[0]["url"] == f"{site}/uploads/original/xx/abc.MOV"
+    # Pv2 没有 thumb/small 变体，缩略图退回原图地址
+    assert photos[1]["id"] == "Pv2"
+    assert photos[1]["type"] == "image"
+    assert photos[1]["thumb"] == f"{site}/uploads/original/xx/pic.jpg"
+    assert LAST_ALBUM_AUTH["value"] == "tok"  # v4 用原始 token，不加 Bearer
+
+
+def _album_get_handler(payload, calls=None):
+    def fake_post(url, json=None, headers=None, timeout=None):
+        if calls is not None:
+            calls.append((urlsplit(url).path, json, headers))
+        resp = Mock()
+        resp.status_code = 200
+        resp.headers = {"Content-Type": "application/json"}
+        resp.json.return_value = payload
+        return resp
+
+    return fake_post
+
+
+def test_album_photos_detail_variant_priority_and_filtering(monkeypatch):
+    """thumb→small→medium 优先；重复/缺 ID 的照片跳过；类型按 mime 或扩展名判断。"""
+    payload = {
+        "id": "A1",
+        "title": "相册",
+        "photos": [
+            {
+                "id": "1",
+                "title": "a",
+                "type": "image/jpeg",
+                "created_at": "2026-09-01 10:00:00",
+                "size_variants": {
+                    "original": {"url": "uploads/original/aa/1.jpg"},
+                    "medium": {"url": "uploads/medium/aa/1.jpeg"},
+                    "thumb2x": {"url": "uploads/thumb2x/aa/1.jpeg"},
+                    "thumb": {"url": "uploads/thumb/aa/1.jpeg"},
+                },
+            },
+            {"id": "2", "title": "b", "type": "image/jpeg",
+             "sizeVariants": {"small": "uploads/small/xx/2.jpeg"}},  # 旧版驼峰 + 字符串变体
+            {"id": "3", "title": "c", "url": "uploads/original/xx/clip.mp4"},  # 无 mime, 靠扩展名
+            {"id": "3", "title": "重复"},
+            {"title": "没有 ID"},
+            "不是对象",
+        ],
+    }
+    calls: list = []
+    monkeypatch.setattr(grabber.requests, "post", _album_get_handler(payload, calls))
+    # base 带尾斜杠时也不能产生 //api、//uploads 这类双斜杠地址
+    album, photos = grabber.lychee_album_photos_detail("http://lychee/", "tok", "A1")
+
+    assert album == {"id": "A1", "title": "相册", "count": 3, "truncated": False}
+    assert [p["id"] for p in photos] == ["1", "2", "3"]  # 重复 ID 与缺 ID 被丢弃
+    assert photos[0]["thumb"] == "http://lychee/uploads/thumb/aa/1.jpeg"
+    assert photos[0]["url"] == "http://lychee/uploads/original/aa/1.jpg"
+    assert photos[0]["created_at"] == "2026-09-01 10:00:00"
+    assert photos[1]["thumb"] == "http://lychee/uploads/small/xx/2.jpeg"
+    assert photos[2]["type"] == "video"
+    assert calls[0][0] == "/api/Album::get"
+    assert calls[0][1] == {"albumID": "A1"}
+    assert calls[0][2]["Authorization"] == "tok"
+
+
+def test_album_photos_detail_truncates_at_limit(monkeypatch):
+    """超过 ALBUM_MANAGE_LIMIT 张只返回前若干张，count 仍是相册真实张数。"""
+    monkeypatch.setattr(grabber, "ALBUM_MANAGE_LIMIT", 2)
+    payload = {
+        "title": "大相册",
+        "photos": [{"id": f"P{i}", "type": "image/jpeg", "url": f"uploads/original/x/{i}.jpg"}
+                   for i in range(5)],
+    }
+    monkeypatch.setattr(grabber.requests, "post", _album_get_handler(payload))
+    album, photos = grabber.lychee_album_photos_detail("http://lychee", "tok", "BIG")
+    assert album["count"] == 5
+    assert album["truncated"] is True
+    assert len(photos) == 2
+
+
+def test_album_photos_detail_reports_auth_failure(monkeypatch):
+    def fake_post(url, json=None, headers=None, timeout=None):
+        resp = Mock()
+        resp.status_code = 401
+        resp.text = "Unauthorized"
+        resp.headers = {"Content-Type": "application/json"}
+        return resp
+
+    monkeypatch.setattr(grabber.requests, "post", fake_post)
+    with pytest.raises(grabber.FetchError):
+        grabber.lychee_album_photos_detail("http://lychee", "bad", "A1")
+
+
+def test_album_photos_route(client, monkeypatch):
+    seen = {}
+
+    def fake_detail(base, token, album_id):
+        seen["args"] = (base, token, album_id)
+        return {"id": album_id, "title": "相册", "count": 1, "truncated": False}, [
+            {"id": "P1", "title": "a", "type": "image", "created_at": "", "thumb": "t", "url": "u"}
+        ]
+
+    monkeypatch.setattr(grabber, "lychee_album_photos_detail", fake_detail)
+    resp = client.post(
+        "/api/album/photos",
+        json={"lychee_url": "http://lychee/", "lychee_token": "t", "album_id": " A1 "},
+    )
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["ok"] is True
+    assert data["album"]["count"] == 1
+    assert data["photos"][0]["id"] == "P1"
+    assert seen["args"] == ("http://lychee", "t", "A1")  # 尾部斜杠去掉、ID 去空格
+
+
+def test_album_photos_route_requires_config(client, monkeypatch):
+    monkeypatch.setattr(grabber, "LYCHEE_URL", "")
+    monkeypatch.setattr(grabber, "LYCHEE_TOKEN", "")
+    resp = client.post("/api/album/photos", json={"album_id": "A1"})
+    assert resp.status_code == 400
+    assert resp.get_json()["ok"] is False
+
+
+def test_album_photos_route_maps_errors(client, monkeypatch):
+    monkeypatch.setattr(
+        grabber, "lychee_album_photos_detail",
+        lambda base, token, album_id: (_ for _ in ()).throw(grabber.FetchError("token 无效")),
+    )
+    resp = client.post("/api/album/photos",
+                       json={"lychee_url": "http://lychee", "lychee_token": "t", "album_id": "A1"})
+    assert resp.status_code == 502
+    assert resp.get_json()["error"] == "token 无效"
+
+    monkeypatch.setattr(
+        grabber, "lychee_album_photos_detail",
+        lambda base, token, album_id: (_ for _ in ()).throw(grabber.requests.ConnectionError("boom")),
+    )
+    resp = client.post("/api/album/photos",
+                       json={"lychee_url": "http://lychee", "lychee_token": "t", "album_id": "A1"})
+    assert resp.status_code == 502
+    assert "无法连接" in resp.get_json()["error"]
+
+
+def test_album_photos_delete_route(client, monkeypatch):
+    calls = []
+
+    def fake_delete(base, token, photo_ids):
+        calls.append((base, token, list(photo_ids)))
+
+    monkeypatch.setattr(grabber, "lychee_delete_photos", fake_delete)
+    resp = client.post(
+        "/api/album/photos/delete",
+        json={"lychee_url": "http://lychee", "lychee_token": "t", "album_id": "A1",
+              "photo_ids": ["P2", "P1", "P2", " ", "P3"]},
+    )
+    data = resp.get_json()
+    assert resp.status_code == 200
+    assert data["ok"] is True
+    assert data["deleted"] == 3
+    assert data["photo_ids"] == ["P2", "P1", "P3"]  # 去重且保持勾选顺序
+    assert calls == [("http://lychee", "t", ["P2", "P1", "P3"])]
+
+
+def test_album_photos_delete_chunks_requests(client, monkeypatch):
+    monkeypatch.setattr(grabber, "ALBUM_DELETE_CHUNK", 2)
+    calls = []
+    monkeypatch.setattr(
+        grabber, "lychee_delete_photos",
+        lambda base, token, ids: calls.append(list(ids)),
+    )
+    resp = client.post(
+        "/api/album/photos/delete",
+        json={"lychee_url": "http://lychee", "lychee_token": "t", "album_id": "A1",
+              "photo_ids": ["1", "2", "3", "4", "5"]},
+    )
+    assert resp.get_json()["deleted"] == 5
+    assert calls == [["1", "2"], ["3", "4"], ["5"]]
+
+
+def test_album_photos_delete_rejects_bad_requests(client, monkeypatch):
+    monkeypatch.setattr(grabber, "lychee_delete_photos",
+                        lambda *a, **k: pytest.fail("不应调用删除"))
+    base = {"lychee_url": "http://lychee", "lychee_token": "t", "album_id": "A1"}
+
+    resp = client.post("/api/album/photos/delete", json={**base, "photo_ids": "P1"})
+    assert resp.status_code == 400          # 必须是一组 ID
+    resp = client.post("/api/album/photos/delete", json={**base})
+    assert resp.status_code == 400          # 缺 photo_ids
+    resp = client.post("/api/album/photos/delete", json={**base, "photo_ids": ["", "  "]})
+    assert resp.status_code == 400          # 全空 ID
+    assert "勾选" in resp.get_json()["error"]
+    resp = client.post("/api/album/photos/delete",
+                       json={"lychee_url": "http://lychee", "lychee_token": "t",
+                             "photo_ids": ["P1"]})
+    assert resp.status_code == 400          # 缺 album_id
+    monkeypatch.setattr(grabber, "ALBUM_DELETE_LIMIT", 2)
+    resp = client.post("/api/album/photos/delete",
+                       json={**base, "photo_ids": ["1", "2", "3"]})
+    assert resp.status_code == 400          # 超出单次上限
+    assert "分批" in resp.get_json()["error"]
+
+
+def test_album_photos_delete_route_maps_errors(client, monkeypatch):
+    monkeypatch.setattr(
+        grabber, "lychee_delete_photos",
+        lambda base, token, ids: (_ for _ in ()).throw(grabber.FetchError("只读账号无删除权限")),
+    )
+    resp = client.post(
+        "/api/album/photos/delete",
+        json={"lychee_url": "http://lychee", "lychee_token": "t", "album_id": "A1",
+              "photo_ids": ["P1"]},
+    )
+    assert resp.status_code == 502
+    assert resp.get_json()["error"] == "只读账号无删除权限"
+
+
+def test_index_html_has_album_manager_panel(client):
+    """首页包含图片管理面板及其交互控件，选相册即可加载。"""
+    html = client.get("/").get_data(as_text=True)
+    for needle in ("mgmt-wrap", "mgmt-grid", "mgmt-select-all", "mgmt-delete",
+                   "/api/album/photos", "/api/album/photos/delete", "loadMgmt()"):
+        assert needle in html
+    assert 'id="album-select"' in html
+
+
+def test_index_html_has_footer_pager(client):
+    """底栏两页 pager: 抓取按钮进底栏, 抓取/管理各有独立相册下拉框。"""
+    html = client.get("/").get_data(as_text=True)
+    for needle in ('id="footer" data-page="0"', 'id="pager"', 'id="pager-track"',
+                   'id="tab-grab"', 'id="tab-mgmt"', 'id="album-mgmt-select"',
+                   'id="transfer-row"', 'setFooterPage', 'bindSlidePager',
+                   "--footer-h", "env(safe-area-inset-bottom)", "no-transfer"):
+        assert needle in html, needle
+    # 三个抓取按钮已移入底栏, 抓取卡片里只剩网址输入框
+    actions = re.search(r'<div class="row actions">(.*?)</div>', html, re.S).group(1)
+    assert "preview-btn" not in actions and "extract-btn" not in actions
+    for btn in ("preview-btn", "extract-btn", "deep-btn"):
+        assert html.index('id="footer"') < html.index('id="%s"' % btn)
+    # 选相册语义隔离: 管理面板只读管理用的下拉框
+    assert '$("album-mgmt-select")' in html
+
+
+def test_index_html_two_independent_views(client):
+    """抓取转存与相册管理是两个独立界面: 各自一个滚动视图, 整屏滑动切换, 面板不混显。"""
+    html = client.get("/").get_data(as_text=True)
+    for needle in ('<body data-view="0">', 'id="vp-track"',
+                   'class="vp-page" id="view-grab"', 'class="vp-page" id="view-mgmt"',
+                   'body[data-view="1"] { --slide: -50%; }',
+                   "translateX(var(--slide, 0%))",
+                   'document.body.dataset.view = String(footerPage)',
+                   'el.inert = i !== footerPage',
+                   "function showMgmtPlaceholder", "if (footerPage !== 1) return"):
+        assert needle in html, needle
+
+    grab = html[html.index('id="view-grab"'):html.index('id="view-mgmt"')]
+    mgmt = html[html.index('id="view-mgmt"'):html.index('id="footer"')]
+    # 抓取相关面板只在抓取视图, 管理面板只在管理视图
+    for own in ('id="preview-wrap"', 'id="gallery-wrap"', 'id="summary"'):
+        assert own in grab and own not in mgmt, own
+    assert 'id="mgmt-wrap"' in mgmt and 'id="mgmt-wrap"' not in grab
+    # 管理界面不再有「收起面板」这种会留下空白界面的入口, 改为返回抓取
+    assert "mgmt-hide" not in html and 'id="mgmt-back"' in html
+    # 结果属于抓取界面: 提取成功后自动切回第一个界面
+    assert "结果属于「抓取转存」界面" in html and "setFooterPage(0)" in html
+
+
+def test_index_html_local_upload_and_auto_mgmt(client):
+    """上传按钮取代「查看/管理图片」; 面板改为进相册管理页自动打开; 按钮行走等分栅格。"""
+    html = client.get("/").get_data(as_text=True)
+    for needle in ('id="local-upload-btn"', 'id="local-files"', 'accept="image/*,video/*"',
+                   "function maybeOpenMgmt", "function showMgmtPlaceholder", "MGMT_CACHE_MS",
+                   "async function startLocalUpload", "function uploadOneLocal",
+                   "/api/upload_local", "if (footerPage === 1) {", "maybeOpenMgmt();",
+                   ".prow.btns", "clamp(13px, 3.5vw, 15px)", "min-height: 44px",
+                   "repeat(auto-fit, minmax(0, 1fr))"):
+        assert needle in html, needle
+    assert "mgmt-open-btn" not in html
+    footer_at = html.index('id="footer"')
+    assert footer_at < html.index('id="local-upload-btn"')
+    assert footer_at < html.index('id="page-mgmt"')
+    # 窄屏短文案 + 完整文案并存, title 保留说明
+    row = re.search(r'<button id="local-upload-btn".*?</button>', html, re.S).group(0)
+    assert 'class="t-long"' in row and 'class="t-short"' in row and "title=" in row
+    assert ".t-short { display: none; }" in html
+
+
+def test_index_html_qr_scan(client):
+    """扫码识图: 图片只在本机解码, 用仓库内 vendored 的 jsQR, 识别结果只填网址不自动抓取。"""
+    html = client.get("/").get_data(as_text=True)
+    for needle in ('id="url-row"', 'id="qr-btn"', '"/static/qr.js"',
+                   "function loadQrLib", "function qrToUrl", "async function qrDecode",
+                   "async function handleQrFile", "jsQR(data.data", "inversionAttempts",
+                   ".actions .url-row { width: 100%; }"):
+        assert needle in html, needle
+    # 只吃图片, 不接受视频; 且必须是本机静态资源, 不引外部 CDN(局域网/离线可用)
+    file_input = re.search(r'<input type="file" id="qr-file"[^>]*>', html).group(0)
+    assert 'accept="image/*"' in file_input and "multiple" not in file_input
+    for bad in ("cdn.jsdelivr.net", "unpkg.com", "cdnjs.", "ga.jspm.io"):
+        assert bad not in html, bad
+    # 识别成功: 填入 #page-url + 高亮「提取图片」, 不直接发起抓取
+    assert "input.value = url" in html and 'eb.classList.add("qr-flash")' in html
+    assert "点「提取图片」开始" in html
+    # 非 http(s) 内容(如 weixin://)要被拒绝, 裸域名/IP 自动补 http://
+    assert 'if (/^[a-z][a-z0-9+.-]*:\\/\\//i.test(raw)) return "";' in html
+    assert 'return "http://" + raw;' in html
+
+
+def test_static_qr_library_is_vendored(client):
+    """jsQR 随镜像一起发布, /static/qr.js 必须能离线取到。"""
+    resp = client.get("/static/qr.js")
+    assert resp.status_code == 200
+    body = resp.get_data()
+    assert len(body) > 50_000 and b"jsQR" in body
+
+
+def test_index_html_bookmarks_collapsed(client):
+    """书签改成与 Lychee 设置同款的折叠面板: 默认收起, 点「📑 书签」才展开, 收起时不占空间。"""
+    html = client.get("/").get_data(as_text=True)
+    toggle = re.search(r'<button class="settings-btn" id="bm-toggle".*?</button>', html, re.S).group(0)
+    assert "📑 书签" in toggle and 'id="bm-count"' in toggle and "▸" in toggle
+    body = re.search(r'<div class="bm-body" id="bm-body"[^>]*>', html).group(0)
+    assert 'style="display:none"' in body
+    for needle in ("function setBmOpen", '$("bm-toggle").addEventListener',
+                   '$("bm-body").style.display = open ? "" : "none"'):
+        assert needle in html, needle
+    # 旧的常驻标题行不再存在, 书签控件全部收进可折叠面板里
+    assert "<b>📑 书签</b>" not in html
+    assert html.index('id="bm-toggle"') < html.index('id="bm-body"')
+    seg = html[html.index('id="bm-body"'):html.index('id="preview-wrap"')]
+    for own in ("bm-select", "bm-add", "bm-edit", "bm-del", "bm-editor"):
+        assert own in seg, own
