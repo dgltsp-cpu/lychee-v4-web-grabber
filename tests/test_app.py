@@ -1168,14 +1168,14 @@ def test_index_html_two_independent_views(client):
 
 
 def test_index_html_local_upload_and_auto_mgmt(client):
-    """上传按钮取代「查看/管理图片」; 面板改为进相册管理页自动打开; 按钮行走等分栅格。"""
+    """上传按钮取代「查看/管理图片」; 面板改为进相册管理页自动打开; 按钮行等宽不溢出。"""
     html = client.get("/").get_data(as_text=True)
     for needle in ('id="local-upload-btn"', 'id="local-files"', 'accept="image/*,video/*"',
                    "function maybeOpenMgmt", "function showMgmtPlaceholder", "MGMT_CACHE_MS",
                    "async function startLocalUpload", "function uploadOneLocal",
                    "/api/upload_local", "if (footerPage === 1) {", "maybeOpenMgmt();",
                    ".prow.btns", "clamp(13px, 3.5vw, 15px)", "min-height: 44px",
-                   "repeat(auto-fit, minmax(0, 1fr))"):
+                   ".prow.btns button { flex: 1 1 0; min-width: 0; min-height: 44px; }"):
         assert needle in html, needle
     assert "mgmt-open-btn" not in html
     footer_at = html.index('id="footer"')
@@ -1232,3 +1232,75 @@ def test_index_html_bookmarks_collapsed(client):
     seg = html[html.index('id="bm-body"'):html.index('id="preview-wrap"')]
     for own in ("bm-select", "bm-add", "bm-edit", "bm-del", "bm-editor"):
         assert own in seg, own
+
+
+def test_index_html_settings_panel_no_layout_jump(client):
+    """Lychee 设置的开合由用户说了算: 手动开合过就记住, 连接成功/切界面都不再强行收起; 圆点只反映真实连通状态。"""
+    html = client.get("/").get_data(as_text=True)
+    for needle in ('const KEY_SETTINGS_OPEN = "img-grabber.settings_open"',
+                   "function autoCollapseSettings",
+                   "if (localStorage.getItem(KEY_SETTINGS_OPEN) === null) setSettingsOpen(false)",
+                   'setSettingsOpen($("lychee-form").style.display === "none", true)',
+                   'savedOpen === null ? !settingsConfigured() : savedOpen === "1"',
+                   ".dot.warn {", "let lycheeConnected = false"):
+        assert needle in html, needle
+    # 收起只可能来自 autoCollapseSettings 这一处判断, 别处不再无条件收起
+    assert html.count("setSettingsOpen(false)") == 1
+    assert html.count("autoCollapseSettings();") == 2
+    # 改过地址/Token 视为未验证, 圆点不能继续装绿
+    assert '["lychee-url", "lychee-token"].forEach' in html
+    assert '"dot" + (lycheeConnected ? " ok" : settingsConfigured() ? " warn" : "")' in html
+
+
+def test_index_html_mobile_keyboard_zoom(client):
+    """键盘/缩放修复: 输入框 ≥16px 不再触发 iOS 自动放大; touch-action 保留 pinch-zoom 才缩得回去;
+    键盘高度由 visualViewport 算成 --kb-h 驱动底栏与内容区。"""
+    html = client.get("/").get_data(as_text=True)
+    assert "initial-scale=1, viewport-fit=cover" in html
+    # 所有 touch-action 都必须带 pinch-zoom(底栏按钮的 manipulation 除外), 否则放大后缩不回来
+    for value in re.findall(r"touch-action:\s*([^;}]+)", html):
+        v = value.strip()
+        assert "pinch-zoom" in v or v == "manipulation", v
+    assert html.count("touch-action: pan-y pinch-zoom") == 3
+    for needle in ("--kb-h", "window.visualViewport", "function bindKeyboardViewport",
+                   "calc(100dvh - var(--kb-h, 0px))", "bottom: var(--kb-h, 0px)",
+                   "@media (hover: none)"):
+        assert needle in html, needle
+    # 手机端与触屏档: 可输入控件一律 16px(iOS 的自动放大红线)
+    mob = html[html.index("@media (max-width: 640px)"):html.index("@media (hover: none)")]
+    rule = re.search(r"input\[type=text\], input\[type=url\], select \{[^}]*\}", mob).group(0)
+    assert "font-size: 16px" in rule and "15px" not in rule
+    assert ".bm-editor input[type=text] { font-size: 16px; }" in mob
+    touch = html[html.index("@media (hover: none)"):]
+    assert "textarea { font-size: 16px; }" in touch.split("@media (max-width: 400px)")[0]
+
+
+def test_index_html_track_alignment(client):
+    """底栏轨道不能留 gap: 否则第二页停靠时右移 8px, 下拉框箭头与「清空相册」被裁。"""
+    html = client.get("/").get_data(as_text=True)
+    track = re.search(r"\.track \{([^}]*)\}", html).group(1)
+    assert "gap" not in track, track
+    assert "width: 200%" in track
+    # 等宽按钮行不能用 auto-fit 栅格: WebKit 会按最长内容撑破容器
+    assert "auto-fit" not in html, "底栏等宽必须用 flex:1 1 0, 不能用 repeat(auto-fit,...)"
+    page = re.search(r"\.page \{[^}]*padding-right: 8px[^}]*\}", html)
+    assert page, "两页的缝隙必须写在 .page 的 padding-right 里(含在 50% 宽度内)"
+    # flex 项的 min-width:auto 会让装满长相册名的下拉框把整页撑宽(手机上表现为按钮被裁)
+    assert re.search(r"\.page \{[^}]*flex: none; min-width: 0;", html), ".page 必须 min-width:0"
+    # 上限用 JS 写死的像素宽度, 不依赖引擎对百分比/固有宽度的解释
+    assert "max-width: var(--pager-w, 50%)" in html
+    assert "max-width: calc(var(--pager-w, 100%) - 8px)" in html
+    assert "function syncPagerWidth" in html and '--pager-w", w + "px"' in html
+    assert ".page { flex-direction: column; flex-wrap: nowrap;" in html
+
+
+def test_index_html_auto_unzoom(client):
+    """放大状态: --kb-h 必须按 scale 折算(否则凭空多出假键盘高度), 且键盘收起后要把缩放复位。"""
+    html = client.get("/").get_data(as_text=True)
+    assert "const kb = Math.max(0, Math.round(innerHeight - (vv.height + vv.offsetTop) * s));" in html
+    assert "const s = vv.scale || 1;" in html
+    assert "function bindAutoUnzoom" in html
+    for needle in ('meta[name="viewport"]', "maximum-scale=1", "vv.scale > 1.01",
+                   "setMeta(base + \", maximum-scale=1, user-scalable=no\", tries > 1)",
+                   "setTimeout(() => setMeta(base, false), 600)"):
+        assert needle in html, needle

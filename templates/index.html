@@ -2,7 +2,8 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- viewport-fit=cover: 让 env(safe-area-inset-*) 在 iPhone 上真正取到值 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>网页图片抓取 → Lychee</title>
   <style>
     :root {
@@ -15,16 +16,18 @@
     html, body { height: 100%; }
     body { overflow: hidden; overscroll-behavior: none; }
     .wrap {
-      display: flex; flex-direction: column; height: 100vh; height: 100dvh;
+      /* --kb-h 由 JS 按 visualViewport 算出的键盘高度: iOS 键盘只缩可视视口, 不缩布局视口 */
+      display: flex; flex-direction: column; height: 100vh; height: calc(100dvh - var(--kb-h, 0px));
       max-width: 1200px; margin: 0 auto; padding: 14px 16px 0; overflow-y: auto;
     }
     header { flex: none; }
     /* 键盘弹起等极端矮屏时, 内容区先压缩而不是把设置面板顶出屏幕 */
-    .vp { flex: 1 1 auto; min-height: 120px; overflow: hidden; touch-action: pan-y; }
+    /* pinch-zoom 必须保留: 只写 pan-y 会让整屏无法两指缩放, iOS 放大后就再也缩不回去 */
+    .vp { flex: 1 1 auto; min-height: 120px; overflow: hidden; touch-action: pan-y pinch-zoom; }
     .vp-track { display: flex; width: 200%; height: 100%; }
     .vp-page {
       width: 50%; flex: none; min-width: 0; overflow-y: auto;
-      touch-action: pan-y;   /* 只把竖向交给滚动, 横向留给切界面手势, 不触发浏览器后退 */
+      touch-action: pan-y pinch-zoom;   /* 竖向给滚动, 横向给切界面手势, 两指给浏览器缩放 */
       -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
       padding: 2px 2px calc(var(--footer-h, 96px) + 18px);
     }
@@ -113,8 +116,9 @@
     .item.show-check .cb { display: block; }
     .empty { color: var(--muted); text-align: center; padding: 60px 0; }
 
+    /* 键盘弹起时整条底栏抬到键盘上方, 否则 iOS 上「预览/提取/深度」会被键盘完全埋掉 */
     .footer {
-      position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel);
+      position: fixed; left: 0; right: 0; bottom: var(--kb-h, 0px); background: var(--panel);
       border-top: 1px solid var(--line); padding: 10px 16px; z-index: 10;
     }
     .footer .row { max-width: 1200px; margin: 0 auto; }
@@ -127,15 +131,20 @@
     .ftab.active { color: var(--text); border-color: var(--accent); }
     /* --slide 只在 body 上取值: 内容轨道与底栏轨道共用同一个位移, 两屏始终对齐 */
     body[data-view="1"] { --slide: -50%; }
-    .pager { touch-action: pan-y; max-width: 1200px; margin: 0 auto; overflow: hidden; }
+    .pager { touch-action: pan-y pinch-zoom; max-width: 1200px; margin: 0 auto; overflow: hidden; }
+    /* 轨道不能留 gap: 两页各 50% 宽, 轨道总宽正好 200%, translateX(-50%) 才能严丝合缝;
+       gap 会让第二页整体右移, 停靠时左边露缝、右边被 pager 裁掉 8px(下拉框箭头/清空相册被切)。 */
     .track {
-      display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; width: 200%;
+      display: flex; flex-wrap: nowrap; align-items: center; width: 200%;
       transform: translateX(var(--slide, 0%)); transition: transform .24s ease;
     }
     .vp-track { transform: translateX(var(--slide, 0%)); transition: transform .26s ease; }
     /* 手指拖动期间去掉缓动, 两屏严格跟手 */
     body.dragging .track, body.dragging .vp-track { transition: none; }
-    .page { width: 50%; flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    /* 两页之间的 8px 缝隙写在页内(padding-right, 含在 50% 宽度里), 滑动时不位移。
+       max-width 用 JS 按底栏实际宽度写死的 --pager-w: 相册下拉框装满长相册名后,
+       部分引擎会按内容撑出 478px 的行, 光靠百分比和 min-width 兜不住。 */
+    .page { width: 50%; flex: none; min-width: 0; max-width: var(--pager-w, 50%); padding-right: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .prow { display: contents; }
     #album-mgmt-select { max-width: 320px; }
     .webp-toggle {
@@ -174,7 +183,9 @@
       .header-actions { width: 100%; justify-content: space-between; align-items: center; }
       .settings-btn { flex: none; }
       input[type=url] { min-width: 0; width: 100%; }
-      input[type=text], input[type=url], select { font-size: 15px; padding: 10px 12px; }
+      /* ≥16px 是硬线: iOS Safari 聚焦小于 16px 的输入框会自动放大整页, 且很难缩回去 */
+      input[type=text], input[type=url], select { font-size: 16px; padding: 10px 12px; }
+      .bm-editor input[type=text] { font-size: 16px; }
       /* 字号与内边距随视口线性缩放: 小屏不挤成一团, 大屏不空旷 */
       button { font-size: clamp(13px, 3.5vw, 15px); padding: 10px clamp(6px, 2vw, 14px); }
       .row { gap: 8px; }
@@ -186,17 +197,19 @@
       .ftab { flex: none; }
       #status-text { min-width: 0; flex: 1; font-size: 12px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       /* 手机端: 界面内改成纵向堆叠, 按钮撑满一行 */
-      .page { flex-direction: column; align-items: stretch; gap: 8px; }
+      .page { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 8px; }
       .prow { display: flex; gap: 8px; align-items: center; }
       /* width:0 + flex:1 让下拉框忽略选项文字宽度, 否则长相册名会撑爆整行 */
-      .prow { min-width: 0; }
+      /* min-width:0 允许收缩; max-width 用底栏实际宽度减去页内 8px 缝隙:
+         长相册名(未命名 / Ship (#xxxx…) 这种)再也不会把整行顶宽、溢出被裁或串到另一屏 */
+      .prow { min-width: 0; max-width: calc(var(--pager-w, 100%) - 8px); }
       .prow select { flex: 1 1 0; width: 0; min-width: 0; }
       .prow .webp-toggle { flex: none; }
       #album-select, #album-mgmt-select { max-width: none !important; }
       .prow button { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      /* 按钮行用等分栅格: N 个按钮永远等宽, 再也不会被 nowrap 撑破后被 pager 裁掉 */
-      .prow.btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
-      .prow.btns button { width: 100%; min-width: 0; min-height: 44px; }
+      /* 按钮行等宽用 flex: 1 1 0 + min-width:0(等分栅格在 WebKit 下会按内容撑破容器) */
+      .prow.btns { display: flex; flex-wrap: nowrap; }
+      .prow.btns button { flex: 1 1 0; min-width: 0; min-height: 44px; }
       .footer button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
       /* 没勾选任何图片时不显示转存按钮, 少占一行 */
       .footer.no-transfer #transfer-row { display: none; }
@@ -213,6 +226,12 @@
       .settings-form .row { flex-direction: column; align-items: stretch; }
       .settings-form input[type=text] { width: 100%; }
       .settings-form #test-btn { width: 100%; }
+    }
+    /* 触屏兜底: iPad 一类宽度 >640px 的触屏同样踩 iOS 的 16px 自动放大线 */
+    @media (hover: none) {
+      input[type=text], input[type=url], input[type=password], input[type=number],
+      input[type=search], input[type=tel], select, textarea { font-size: 16px; }
+      .bm-editor input[type=text] { font-size: 16px; }
     }
     /* 窄屏(≤400px)用短文案, 宽屏用完整文案; title 里始终保留完整说明 */
     .t-short { display: none; }
@@ -1387,6 +1406,86 @@ $("qr-file").addEventListener("change", () => {
   if ("ResizeObserver" in window) new ResizeObserver(apply).observe(footer);
   window.addEventListener("resize", apply);
   apply();
+})();
+
+/* 底栏实际可用宽度写成 px 变量: 轨道/行/页的上限一律按它算, 不依赖各引擎对百分比与
+   flex 固有宽度的解释差异(WebKit 会按最长相册名撑宽整行, Blink 不会)。 */
+(function syncPagerWidth() {
+  const pager = $("pager");
+  if (!pager) return;
+  const apply = () => {
+    const w = Math.round(pager.clientWidth);
+    if (w > 0) document.documentElement.style.setProperty("--pager-w", w + "px");
+  };
+  if ("ResizeObserver" in window) new ResizeObserver(apply).observe(pager);
+  window.addEventListener("resize", apply);
+  apply();
+})();
+
+/* 键盘适配: iOS 的键盘只压缩可视视口(visualViewport), 布局视口不变, 于是固定底栏被键盘埋掉、
+   聚焦的输入框也顶不出来 —— 系统只能靠放大页面来「够到」输入框。这里把键盘高度算成 --kb-h
+   交给 CSS(底栏抬到键盘上方 + 内容区按实际可视高度收缩), 并把被挡住的输入框滚到中间。 */
+(function bindKeyboardViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;                     // 不支持就完全不干预, 保持原布局
+  const root = document.documentElement.style;
+  let raf = 0;
+  const apply = () => {
+    raf = 0;
+    // 页面被放大时 vv.height 已经除以过 scale, 不乘回来会凭空算出几百 px 的「假键盘」
+    const s = vv.scale || 1;
+    const kb = Math.max(0, Math.round(innerHeight - (vv.height + vv.offsetTop) * s));
+    const prev = parseInt(root.getPropertyValue("--kb-h"), 10) || 0;
+    if (Math.abs(kb - prev) < 2) return;
+    root.setProperty("--kb-h", kb + "px");
+    if (kb <= 80) return;
+    if (s > 1.02) return;      // 放大状态下坐标换算不可靠, 交给下面的自动复位缩放
+    const el = document.activeElement;
+    if (!el || !/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
+    const r = el.getBoundingClientRect();
+    const limit = innerHeight - kb;
+    if (r.bottom > limit || r.top < 0) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  };
+  const onTick = () => { if (!raf) raf = requestAnimationFrame(apply); };
+  vv.addEventListener("resize", onTick);
+  vv.addEventListener("scroll", onTick);
+  window.addEventListener("resize", onTick);
+  document.addEventListener("focusout", onTick);   // 键盘收起后复位 --kb-h
+  apply();
+})();
+
+/* iOS 因聚焦输入框放大过页面之后, 收起键盘并不会自己缩回去 —— 用户看到的「无法全屏、也缩不回来」。
+   检测到「键盘已收起但页面仍是放大状态」时, 临时写一次 maximum-scale=1 逼 WebKit 重算并复位缩放,
+   随后还原 meta, 双指缩放能力不受影响。 */
+(function bindAutoUnzoom() {
+  const meta = document.querySelector('meta[name="viewport"]');
+  const vv = window.visualViewport;
+  if (!meta || !vv) return;
+  const base = meta.getAttribute("content") || "";
+  let typed = false, timer = 0, tries = 0;
+  const setMeta = (content, reinsert) => {
+    const node = document.querySelector('meta[name="viewport"]');
+    if (!node) return;
+    node.setAttribute("content", content);
+    // 部分 WebKit 只在 meta 节点被重新插入时才重算缩放, 第二次尝试走这条路
+    if (reinsert && node.parentNode) node.parentNode.replaceChild(node.cloneNode(true), node);
+  };
+  const stuck = () => vv.scale > 1.01 && innerHeight - (vv.height + vv.offsetTop) * vv.scale < 40;
+  const tick = () => {
+    if (!typed || tries >= 2 || !stuck()) return;
+    tries += 1;
+    typed = false;
+    setMeta(base + ", maximum-scale=1, user-scalable=no", tries > 1);
+    clearTimeout(timer);
+    timer = setTimeout(() => setMeta(base, false), 600);
+  };
+  document.addEventListener("focusin", (e) => {
+    const tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") { typed = true; tries = 0; }
+  });
+  vv.addEventListener("resize", tick);
+  window.addEventListener("resize", tick);
+  document.addEventListener("focusout", () => { setTimeout(tick, 260); setTimeout(tick, 800); });
 })();
 
 $("select-all").addEventListener("click", () => {
