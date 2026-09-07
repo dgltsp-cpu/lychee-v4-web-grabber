@@ -318,6 +318,7 @@ pytest tests/ -v       # 全部用本地 HTTP 服务器测试，不需要公网
 - **图片预览显示“加载失败”**：目标站点防盗链严格，可手动点击图片尝试；或换 `UPLOAD_METHOD=import` 让 Lychee 自己拉取。
 - **提取不到图片**：页面可能是 JS 动态渲染(SPA)或需要登录，静态 HTML 里没有图片。可先用浏览器打开页面再让工具抓取已经渲染后的地址；本工具已覆盖常见的 `data-src`/`data-original` 懒加载写法。
 - **抓内网站点 502**：`BLOCK_PRIVATE_NETWORKS` 默认 `true`，抓内网需显式设为 `false`。
+- **顶栏圆点是黄色 / 相册下拉框一直是空的**：地址和 Token 填了但没连通。点开「⚙ Lychee 设置」看「连接测试 / 加载相册」的报错原文再对症处理——报 `HTTP 400` 通常是 Token 为空或没复制全（`.env` 里 `LYCHEE_TOKEN` 留空时页面不会自动带 Token，需要每台设备手填）；报 `401` 是 Token 已失效或账户权限不足；请求根本没回来则是 `LYCHEE_URL` 填了 `localhost`、或两个容器不在同一 docker 网络（见「局域网 / 手机访问」）
 
 ## 安全提醒
 

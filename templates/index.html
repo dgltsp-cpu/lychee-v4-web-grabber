@@ -75,6 +75,7 @@
     .settings-form { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
     .dot.ok { background: var(--ok); }
+    .dot.warn { background: #e0a33e; }
 
     .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .toolbar .spacer { flex: 1; }
@@ -438,15 +439,37 @@ function reveal(id) {
   }
 }
 
-function setSettingsOpen(open) {
+/* 「Lychee 设置」的开合是用户自己的选择: 手动开合过就记住, 之后程序不再自动收起把版面跳走。
+   小圆点只反映真实连通状态: 绿=连上过, 黄=填了但没连通, 灰=还没填。 */
+const KEY_SETTINGS_OPEN = "img-grabber.settings_open";
+let lycheeConnected = false;
+
+function updateLycheeDot() {
+  $("lychee-state").className =
+    "dot" + (lycheeConnected ? " ok" : settingsConfigured() ? " warn" : "");
+}
+
+function setSettingsOpen(open, remember) {
   $("lychee-form").style.display = open ? "" : "none";
   $("toggle-arrow").textContent = open ? "▾" : "▸";
-  $("lychee-state").className = "dot" + (settingsConfigured() ? " ok" : "");
+  if (remember) localStorage.setItem(KEY_SETTINGS_OPEN, open ? "1" : "0");
+  updateLycheeDot();
+}
+
+// 仅用于"用户从没手动开合过"的场景(无记录), 有记录时一律尊重用户
+function autoCollapseSettings() {
+  if (localStorage.getItem(KEY_SETTINGS_OPEN) === null) setSettingsOpen(false);
 }
 
 $("toggle-settings").addEventListener("click", () => {
-  setSettingsOpen($("lychee-form").style.display === "none");
+  setSettingsOpen($("lychee-form").style.display === "none", true);
 });
+// 改过地址或 Token 就等于"未验证", 圆点先回到黄/灰, 别继续显示绿色骗人
+["lychee-url", "lychee-token"].forEach((id) =>
+  $(id).addEventListener("input", () => {
+    lycheeConnected = false;
+    updateLycheeDot();
+  }));
 
 function visibleIndexes() {
   const out = [];
@@ -739,8 +762,12 @@ $("test-btn").addEventListener("click", async () => {
     refreshFooter();
     // 已经停在「相册管理」页时, 连上就自动把面板打开
     if (footerPage === 1) maybeOpenMgmt(true);
-    setSettingsOpen(false);
+    lycheeConnected = true;
+    updateLycheeDot();
+    autoCollapseSettings();   // 只有你没手动开合过才会收起
   } catch (err) {
+    lycheeConnected = false;
+    updateLycheeDot();
     toast(err.message);
   } finally {
     btn.disabled = false;
@@ -997,7 +1024,7 @@ function setFooterPage(index) {
   // 滑到「相册管理」界面才加载/显示管理面板; 抓图界面永远不出现它
   if (footerPage === 1) {
     // 已配好且相册列表已加载时, 进管理界面顺手收起设置面板, 把屏幕留给照片
-    if ($("album-mgmt-select").options.length > 1) setSettingsOpen(false);
+    if ($("album-mgmt-select").options.length > 1) autoCollapseSettings();
     maybeOpenMgmt();
   }
 }
@@ -1751,7 +1778,9 @@ renderBookmarks();
   $("convert-webp").addEventListener("change", () => {
     localStorage.setItem(KEY_WEBP, $("convert-webp").checked ? "1" : "0");
   });
-  setSettingsOpen(!settingsConfigured());
+  // 起始开合: 有用户记录就用记录, 没有才按"未配置→展开 / 已配置→收起"给默认值
+  const savedOpen = localStorage.getItem(KEY_SETTINGS_OPEN);
+  setSettingsOpen(savedOpen === null ? !settingsConfigured() : savedOpen === "1");
   if ($("lychee-url").value && $("lychee-token").value) $("test-btn").click();
 })();
 </script>
