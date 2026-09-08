@@ -121,6 +121,11 @@ sudo nginx -t && sudo systemctl reload nginx
 
 查看构建状态：<https://github.com/dgltsp-cpu/lychee-v4-web-grabber/actions>
 
+首次需要授权一次（只需做一次）：<https://github.com/users/dgltsp-cpu/packages/container/lychee-v4-web-grabber/settings>
+→ **Manage Actions access** → **Add Repository** → 选 `dgltsp-cpu/lychee-v4-web-grabber` → 角色 **Write**。
+没授权时 CI 会在推送阶段报 `denied: permission_denied: write_package`（本包最早是用 PAT 手动 push 创建的，
+仓库的 Actions 身份默认拿不到写权限），构建看起来全绿但 `:latest` 摘要不变。
+
 ```bash
 git pull
 docker compose pull && docker compose up -d
