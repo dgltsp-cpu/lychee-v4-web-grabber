@@ -115,12 +115,27 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ## 7. 升级
 
+镜像由本仓库的 GitHub Actions 自动构建：代码 `git push` 到 `main` 后，`.github/workflows/docker.yml`
+会原生构建 `linux/amd64` + `linux/arm64` 两个架构并合并成多架构 `:latest` 推到 GHCR（约 3~8 分钟，
+有层缓存时更快）。**等 Actions 变绿再在 VPS 上 pull**，否则拉到的仍是旧镜像。
+
+查看构建状态：<https://github.com/dgltsp-cpu/lychee-v4-web-grabber/actions>
+
 ```bash
 git pull
 docker compose pull && docker compose up -d
 ```
 
+验证容器里确实是新代码（比看网页直接）：
+
+```bash
+docker exec image-grabber-v4 grep -c syncPagerWidth /app/templates/index.html   # ≥1 才是新版
+```
+
 > 若只改了 `docker-compose.yml` 里的环境变量（如并发数），不需要重新拉镜像，`docker compose up -d --force-recreate` 即可生效。
+>
+> 不想等 CI 时也可以在 VPS 上直接源码构建：把 `docker-compose.yml` 里的 `# build: .` 取消注释后
+> `docker compose up -d --build`。注意此后别再 `docker compose pull`，那会用 GHCR 镜像覆盖本地构建。
 
 ## 常见问题
 
